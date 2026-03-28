@@ -324,7 +324,79 @@ configure_dhcp_ip() {
     echo -e "  当前 IP: ${NEW_IP:-正在获取中...}"
 }
 
-# 网络 IP 配置二级菜单
+# ==============================================================
+# IP 流量伪装与 NAT 转发管理 (内核 + 防火墙)
+# ==============================================================
+
+_update_sysctl_forward() {
+    local enable=$1
+    if [ "$enable" == "on" ]; then
+        sysctl -w net.ipv4.ip_forward=1 &>/dev/null
+        sed -i 's/^#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/' /etc/sysctl.conf
+        grep -q "^net.ipv4.ip_forward=1" /etc/sysctl.conf || echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+    else
+        sysctl -w net.ipv4.ip_forward=0 &>/dev/null
+        sed -i 's/^net.ipv4.ip_forward=1/#net.ipv4.ip_forward=1/' /etc/sysctl.conf
+    fi
+    sysctl -p &>/dev/null
+}
+
+manage_nat_forwarding() {
+    local driver="unknown"
+    if command -v ufw &>/dev/null; then driver="ufw"; fi
+    if command -v firewall-cmd &>/dev/null; then driver="firewalld"; fi
+
+    clear
+    echo -e "${YELLOW}================ IP 流量伪装管理 (NAT 转发) ================${NC}"
+    
+    # 检测状态
+    local forward_status=$(cat /proc/sys/net/ipv4/ip_forward)
+    local masq_status="no"
+    if [ "$driver" == "firewalld" ]; then
+        masq_status=$(firewall-cmd --query-masquerade 2>/dev/null)
+    elif [ "$driver" == "ufw" ]; then
+        grep -q "DEFAULT_FORWARD_POLICY=\"ACCEPT\"" /etc/default/ufw && masq_status="yes"
+    fi
+
+    echo -e "内核转发状态: $([ "$forward_status" == "1" ] && echo -e "${GREEN}已开启${NC}" || echo -e "${RED}已关闭${NC}")"
+    echo -e "防火墙伪装:   $([ "$masq_status" == "yes" ] && echo -e "${GREEN}Active${NC}" || echo -e "${RED}Inactive${NC}")"
+    echo -e "--------------------------------------------------------"
+    
+    if [ "$masq_status" == "no" ]; then
+        echo -e "${CYAN}提示:${NC} 开启后可实现 VPS 的 NAT 流量中转/隧道转发功能。"
+        read -p "是否确认开启 IP 流量伪装? (y/n): " confirm < /dev/tty
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            _log_info "正在开启内核转发..."
+            _update_sysctl_forward "on"
+            _log_info "正在配置防火墙伪装规则..."
+            if [ "$driver" == "firewalld" ]; then
+                firewall-cmd --permanent --add-masquerade &>/dev/null
+                firewall-cmd --reload &>/dev/null
+            elif [ "$driver" == "ufw" ]; then
+                sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+                # 这里简单处理，核心 UFW NAT 转发建议配合 _config_ufw_nat (如果需要更复杂的规则)
+                ufw reload &>/dev/null
+            fi
+            _log_info "IP 流量伪装已成功开启。"
+        fi
+    else
+        read -p "是否确认关闭 IP 流量伪装并停用数据转发? (y/n): " confirm < /dev/tty
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            _log_info "正在关闭防火墙伪装规则..."
+            if [ "$driver" == "firewalld" ]; then
+                firewall-cmd --permanent --remove-masquerade &>/dev/null
+                firewall-cmd --reload &>/dev/null
+            elif [ "$driver" == "ufw" ]; then
+                sed -i 's/DEFAULT_FORWARD_POLICY="ACCEPT"/DEFAULT_FORWARD_POLICY="DROP"/' /etc/default/ufw
+                ufw reload &>/dev/null
+            fi
+            _log_info "正在关闭内核转发..."
+            _update_sysctl_forward "off"
+            _log_info "IP 流量伪装已关闭。"
+        fi
+    fi
+    read -p "按回车键返回二级菜单..." < /dev/tty
+}
 network_menu() {
     while true; do
         clear
@@ -334,14 +406,16 @@ network_menu() {
         echo " 1. 查看当前网络信息"
         echo " 2. 配置静态 IP (交互式)"
         echo " 3. 切换为 DHCP 自动获取"
+        echo " 4. IP 流量伪装管理 (NAT 转发)"
         echo " 0. 返回主菜单"
         echo -e "${GREEN}==============================================${NC}"
-        read -p "请选择操作 [0-3]: " net_choice
+        read -p "请选择操作 [0-4]: " net_choice
 
         case $net_choice in
             1) show_network_info ;;
             2) configure_static_ip; read -p "按回车键继续..." ;;
             3) configure_dhcp_ip; read -p "按回车键继续..." ;;
+            4) manage_nat_forwarding ;;
             0) break ;;
             *) echo -e "${RED}无效输入。${NC}"; sleep 1 ;;
         esac
