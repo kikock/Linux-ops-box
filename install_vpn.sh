@@ -266,17 +266,19 @@ network_diagnosis() {
 
     # 1. 本机 IP 与地理位置信息
     echo -e "${YELLOW}[1] 本机网络身份探测:${NC}"
-    local IP_INFO=$(curl -s -m 5 https://ipapi.co/json/ 2>/dev/null)
-    if [ -n "$IP_INFO" ]; then
-        local CUR_IP=$(echo "$IP_INFO" | grep -oE '"ip": "[^"]+"' | cut -d'"' -f4)
-        local ORG=$(echo "$IP_INFO" | grep -oE '"org": "[^"]+"' | cut -d'"' -f4)
-        local CITY=$(echo "$IP_INFO" | grep -oE '"city": "[^"]+"' | cut -d'"' -f4)
-        local COUNTRY=$(echo "$IP_INFO" | grep -oE '"country_name": "[^"]+"' | cut -d'"' -f4)
-        echo -e "    公网 IP: ${GREEN}$CUR_IP${NC}"
-        echo -e "    运营商:  ${GREEN}$ORG${NC}"
-        echo -e "    所在地:  ${GREEN}$CITY, $COUNTRY${NC}"
+    # 使用多源对冲机制，防止单一 API 失效
+    local IP_INFO=$(curl -s -m 5 https://ipapi.co/json/ 2>/dev/null || curl -s -m 5 http://ip-api.com/json/ 2>/dev/null)
+    if [ -n "$IP_INFO" ] && [[ "$IP_INFO" == *"ip"* || "$IP_INFO" == *"query"* ]]; then
+        local CUR_IP=$(echo "$IP_INFO" | grep -oE '"(ip|query)": "[^"]+"' | head -1 | cut -d'"' -f4)
+        local ORG=$(echo "$IP_INFO" | grep -oE '"(org|as|isp)": "[^"]+"' | head -1 | cut -d'"' -f4)
+        local CITY=$(echo "$IP_INFO" | grep -oE '"city": "[^"]+"' | head -1 | cut -d'"' -f4)
+        local COUNTRY=$(echo "$IP_INFO" | grep -oE '"(country_name|country)": "[^"]+"' | head -1 | cut -d'"' -f4)
+        
+        echo -e "    公网 IP: ${GREEN}${CUR_IP:-未知}${NC}"
+        echo -e "    运营商:  ${GREEN}${ORG:-未知}${NC}"
+        [ -n "$CITY" ] && [ -n "$COUNTRY" ] && echo -e "    所在地:  ${GREEN}$CITY, $COUNTRY${NC}" || echo -e "    所在地:  ${GREEN}${CITY:-}${COUNTRY:-未知}${NC}"
     else
-        echo -e "    ${RED}✗ 无法连接到 IP 探测服务 (超时)${NC}"
+        echo -e "    ${RED}✗ 无法连接到 IP 探测服务 (GitHub/CDN 阻断或 API 超时)${NC}"
     fi
     echo ""
 
@@ -284,8 +286,15 @@ network_diagnosis() {
     test_ping() {
         local name=$1
         local host=$2
-        echo -n -e "    测试 ${CYAN}%-15s${NC} -> " "$name"
-        local result=$(ping -c 4 -W 2 "$host" 2>/dev/null | tail -1 | awk -F '/' '{print $5}')
+        # 修正：printf 必须单独调用，且 %-15s 是 printf 的特权
+        printf "    测试 ${CYAN}%-15s${NC} -> " "$name"
+        
+        # 兼容性 Ping 解析逻辑 (针对不同 OS 输出)
+        local ping_out=$(ping -c 4 -W 2 "$host" 2>/dev/null)
+        local result=$(echo "$ping_out" | tail -1 | grep '/' | awk -F '/' '{print $5}')
+        # 如果 awk 解析失败 (部分系统格式不同)，尝试二次提取
+        [ -z "$result" ] && result=$(echo "$ping_out" | grep 'avg' | awk -F'/' '{print $5}')
+
         if [ -n "$result" ]; then
             if (( $(echo "$result < 50" | bc -l) )); then
                 echo -e "${GREEN}${result} ms (极佳)${NC}"
@@ -311,16 +320,16 @@ network_diagnosis() {
     if command -v speedtest-cli &>/dev/null; then
         speedtest-cli --simple
     else
-        echo -n "    正在通过标准节点拉取测速文件 (10MB)... "
-        local START_TIME=$(date +%s)
-        if curl -s -o /dev/null http://speedtest.tele2.net/10MB.zip; then
-            local END_TIME=$(date +%s)
-            local DIFF_TIME=$((END_TIME - START_TIME))
-            [ $DIFF_TIME -le 0 ] && DIFF_TIME=1
-            local SPEED=$((10 / DIFF_TIME))
-            echo -e "${GREEN}${SPEED} MB/s${NC}"
+        printf "    正在从全球 CDN 节点拉取测速文件 (10MB)... "
+        # 使用 Cloudflare 边缘节点测速，更真实反映国际带宽
+        local SPEED_INFO=$(curl -L -s -o /dev/null -w "%{speed_download}" --max-time 15 https://speed.cloudflare.com/__down?bytes=10485760)
+        
+        if [ -n "$SPEED_INFO" ] && (( $(echo "$SPEED_INFO > 0" | bc -l) )); then
+            # 换算为 MB/s (1048576 = 1MB)
+            local MB_PER_SEC=$(echo "scale=2; $SPEED_INFO / 1048576" | bc -l)
+            echo -e "${GREEN}${MB_PER_SEC} MB/s${NC}"
         else
-            echo -e "${RED}测速失败 (网络不通)${NC}"
+            echo -e "${RED}测速失败 (节点连接超时)${NC}"
         fi
     fi
 
