@@ -55,8 +55,8 @@ fw_show_status() {
                 local services=$(firewall-cmd --zone=$zone --list-services 2>/dev/null | xargs)
                 local ports=$(firewall-cmd --zone=$zone --list-ports 2>/dev/null | xargs)
                 
-                [ -n "$services" ] && printf "  %-14s: %s\n" "➜ 🌐 [已放行服务]" "${YELLOW}$services${NC}"
-                [ -n "$ports" ]    && printf "  %-14s: %s\n" "➜ 🔌 [已放行端口]" "${YELLOW}$ports${NC}"
+                [ -n "$services" ] && printf "  %-14s: ${YELLOW}%s${NC}\n" "➜ 🌐 [已放行服务]" "$services"
+                [ -n "$ports" ]    && printf "  %-14s: ${YELLOW}%s${NC}\n" "➜ 🔌 [已放行端口]" "$ports"
                 
                 local masq=$(firewall-cmd --zone=$zone --query-masquerade 2>/dev/null)
                 if [ "$masq" = "yes" ]; then
