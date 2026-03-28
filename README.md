@@ -6,7 +6,7 @@
 
 - **多发行版兼容**: 深度适配 Ubuntu/Debian/CentOS/Rocky/Armbian/Alpine，自动识别底层包管理器（apt/dnf/yum/apk）。
 - **完全解耦的架构**: 主程序仅 200 行负责 TUI（图形化交互界面）和分发控制，各类功能下沉至 `modules/` 子模块，互不干扰。
-- **透明审计**: 所有状态输出通过专门的日志基座 `common.sh`，实现控制台高亮输出与 `/var/log/tk_system_init.log` 原文存档双写。
+- **透明审计**: 所有状态输出通过专门的日志基座 `common.sh`，实现控制台高亮输出与 `/var/log/ck_system_init.log` 原文存档双写。
 - **免密部署**: 在线/离线双通道部署安装机制。
 
 ## 🚀 快捷部署与安装

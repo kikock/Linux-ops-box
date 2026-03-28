@@ -23,7 +23,7 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-TARGET_OPT="/opt/tk_sysinit"
+TARGET_OPT="/opt/ck_sysinit"
 TARGET_BIN="/usr/local/bin/sysinit"
 REPO_URL="https://github.com/kikock/Linux-ops-box.git"
 
