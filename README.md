@@ -11,7 +11,7 @@
 
 ---
 
-## 🚀 1. 系统初始化工具箱 (sysinit)
+## 🚀 1. 系统初始化工具箱 (ck_ck_sysinit)
 
 用于服务器首选的初始化流程，包括 SSH 安全防范、网络配置、系统优化等。
 
@@ -19,7 +19,7 @@
 ```bash
 curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_system.sh | sudo bash
 ```
-> 安装完成后，在任何目录输入 `sysinit` 即可呼出管理菜单。
+> 安装完成后，在任何目录输入 `ck_ck_sysinit` 即可呼出管理菜单。
 
 ---
 

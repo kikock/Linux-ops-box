@@ -24,7 +24,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 TARGET_OPT="/opt/ck_sysinit"
-TARGET_BIN="/usr/local/bin/sysinit"
+TARGET_BIN="/usr/local/bin/ck_sysinit"
 REPO_URL="https://github.com/kikock/Linux-ops-box.git"
 
 # 2. 核心源码定位：自动判定是本地执行还是云端 curl 管道执行
@@ -137,6 +137,6 @@ fi
 echo -e "\n${GREEN}==============================================${NC}"
 echo -e "${GREEN}🎉 恭喜！「自动化系统运维工具箱」全模块安装穿透成功！${NC}"
 echo -e "您现在可以在当前操作系统的 ${YELLOW}任意目录、任意位置${NC} 敲击以下指令快速呼出 TUI 控制台：\n"
-echo -e "  🔥  ${CYAN}sysinit${NC}"
+echo -e "  🔥  ${CYAN}ck_sysinit${NC}"
 echo -e "\n${BLUE}==============================================${NC}"
 exit 0
