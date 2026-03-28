@@ -330,6 +330,64 @@ network_diagnosis() {
 }
 
 # ================================================================
+# 4. 域名测速与路由链路分析工具
+# ================================================================
+domain_route_analysis() {
+    clear
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "${CYAN}       域名测速与路由链路分析工具             ${NC}"
+    echo -e "${CYAN}======================================================${NC}"
+
+    # 检查并安装必要工具
+    for cmd in traceroute mtr; do
+        if ! command -v $cmd &>/dev/null; then
+            echo -e "${YELLOW}正在安装缺失工具: $cmd...${NC}"
+            ${PKG_MGR} install -y $cmd &>/dev/null
+        fi
+    done
+
+    read -p "请输入要测试的域名 (默认 ctest.cdn.nintendo.net): " TARGET < /dev/tty
+    TARGET=${TARGET:-ctest.cdn.nintendo.net}
+    # 提取纯域名/IP
+    local DOMAIN=$(echo $TARGET | sed -e 's|^[^/]*//||' -e 's|/.*$||')
+
+    # --- 第一部分：HTTP 响应时间拆解 ---
+    echo -e "\n${YELLOW}[1] HTTP 链路响应拆解:${NC}"
+    curl -o /dev/null -s -w \
+        "    DNS 解析:   ${CYAN}%{time_namelookup} s${NC}\n\
+    TCP 握手:   ${CYAN}%{time_connect} s${NC}\n\
+    首字节响应: ${CYAN}%{time_starttransfer} s${NC}\n\
+    总计耗时:   ${GREEN}%{time_total} s${NC}\n" \
+        -L --max-time 10 "http://$DOMAIN"
+
+    # --- 第二部分：路由图 (Traceroute) ---
+    echo -e "${YELLOW}[2] 路由追踪路径图 (Traceroute):${NC}"
+    echo -e "${BLUE}序号   IP 地址            节点延迟 (RTT)${NC}"
+    echo -e "------------------------------------------------------"
+    traceroute -q 1 -w 1 -n "$DOMAIN" 2>/dev/null | awk '
+        NR>1 {
+            if ($2 == "*") {
+                printf "  %-4s  %-15s    %s\n", $1, "* * *", "请求超时"
+            } else {
+                color="'${GREEN}'"; 
+                if ($3 > 100) color="'${RED}'";
+                printf "  %-4s  %-15s    %s%s ms%s\n", $1, $2, color, $3, "'${NC}'"
+            }
+        }
+    '
+    echo -e "------------------------------------------------------"
+
+    # --- 第三部分：动态链路稳定性测试 (MTR) ---
+    echo -e "\n${YELLOW}[3] 链路丢包率与稳定性检测 (MTR 10次轮询):${NC}"
+    mtr -rw -c 10 "$DOMAIN" | tail -n +2 | awk '{
+        printf "  节点: %-18s  丢包: %-4s  平均延迟: %-6s\n", $2, $3, $6
+    }'
+
+    echo -e "\n${CYAN}======================================================${NC}"
+    read -p "分析完成，按回车键返回..." < /dev/tty
+}
+
+# ================================================================
 # 0. 巡航管理主循环
 # ================================================================
 while true; do
@@ -348,9 +406,10 @@ while true; do
     echo " 3. 系统 BBR 加速自检与开启"
     echo " 4. 彻底卸载所有 VPN/代理组件"
     echo " 5. 运行游戏联机与网速诊断"
+    echo " 6. 域名测速与路由链路分析"
     echo " 0. 退出工具箱"
     echo -e "${GREEN}======================================================${NC}"
-    read -p "请选择交互选项 [0-5]: " main_choice < /dev/tty
+    read -p "请选择交互选项 [0-6]: " main_choice < /dev/tty
 
     case "$main_choice" in
         1) install_wireguard ;;
@@ -377,6 +436,7 @@ while true; do
             read -p "按回车键返回..." < /dev/tty
             ;;
         5) network_diagnosis ;;
+        6) domain_route_analysis ;;
         0) exit 0 ;;
         *) echo -e "${RED} 无效参数${NC}"; sleep 1 ;;
     esac
