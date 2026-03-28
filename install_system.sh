@@ -127,6 +127,8 @@ for sh_file in "$TARGET_OPT"/modules/*.sh; do
 done
 
 echo -e "[3/3] 正在向上编译链接统全局调令符 ..."
+# 清理旧版本指令残留 (如果有的话)
+[ -L "/usr/local/bin/sysinit" ] && rm -f "/usr/local/bin/sysinit"
 ln -sf "$TARGET_OPT/system_init.sh" "$TARGET_BIN"
 
 # 清理临时下载痕迹 (如果是云端拉取)
