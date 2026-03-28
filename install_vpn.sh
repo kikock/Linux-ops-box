@@ -1,0 +1,288 @@
+#!/bin/bash
+# =================================================================
+# 脚本名称: install_vpn.sh
+# 描述: VPS-VPN 专家管理工具 (v1.0)
+# 协议支持: WireGuard (高性能隧道) / Xray-Reality (流量隐蔽代理)
+# =================================================================
+
+# 颜色定义
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# 权限检测
+if [[ $EUID -ne 0 ]]; then
+   echo -e "${RED}错误: 该工具需要 root 权限，请使用 sudo 执行。${NC}"
+   exit 1
+fi
+
+# 基础环境架构自摸
+ARCH=$(uname -m)
+XRAY_ARCH="64"
+[ "$ARCH" = "aarch64" ] && XRAY_ARCH="arm64-v8a"
+
+# ================================================================
+# 私有辅助函数: Github 线路自适应探测
+# ================================================================
+_get_gh_mirror() {
+    if curl -Is -m 3 "https://github.com" | head -1 | grep -q '200\|301\|302'; then
+        echo "https://github.com"
+    else
+        echo "https://ghproxy.net/https://github.com"
+    fi
+}
+
+# ================================================================
+# 私有辅助函数: BBR 加速自检与开启
+# ================================================================
+check_and_enable_bbr() {
+    echo -e "  ⏳ 正在检测内核 BBR 拥塞控制算法状态..."
+    local BBR_STATUS=$(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')
+    if [[ "$BBR_STATUS" == "bbr" ]]; then
+        echo -e "${GREEN}  ✓ BBR 加速已在内核层生效。${NC}"
+    else
+        echo -e "${YELLOW}  ⚠ 未检测到 BBR 加速，建议开启以提升 VPN 链路同步性能。${NC}"
+        read -p " 是否现在一键开启 BBR? (y/n) " bbr_confirm < /dev/tty
+        if [[ "$bbr_confirm" =~ ^[Yy]$ ]]; then
+            echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+            echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+            sysctl -p &>/dev/null
+            echo -e "${GREEN}  ✓ BBR 指令已下达，已刷新内核参。${NC}"
+        fi
+    fi
+}
+
+# ================================================================
+# 1. 协议 A: WireGuard 自动化安装逻辑
+# ================================================================
+install_wireguard() {
+    clear
+    echo -e "${CYAN}================ 核心部署: WireGuard (高速隧道) ================${NC}"
+    
+    # 检测环境并安装依赖
+    if command -v wg &>/dev/null; then
+        echo -e "${YELLOW}检测到 WireGuard 已存在于系统中。${NC}"
+    else
+        echo -e "  ➜ 正在静默注入 WireGuard 内核工具包..."
+        # 兼容性多包管理器处理
+        if command -v apt-get &>/dev/null; then
+            apt-get update && apt-get install -y wireguard qrencode curl
+        elif command -v yum &>/dev/null; then
+            yum install -y elrepo-release epel-release
+            yum install -y kmod-wireguard wireguard-tools qrencode
+        fi
+    fi
+
+    local WG_DIR="/etc/wireguard"
+    [ ! -d "$WG_DIR" ] && mkdir -p "$WG_DIR"
+    
+    local SERV_PRIV_KEY=$(wg genkey)
+    local SERV_PUB_KEY=$(echo "$SERV_PRIV_KEY" | wg pubkey)
+    local CLI_PRIV_KEY=$(wg genkey)
+    local CLI_PUB_KEY=$(echo "$CLI_PRIV_KEY" | wg pubkey)
+    local SERVER_IP=$(curl -s ip.sb || curl -s ifconfig.me)
+    local LISTEN_PORT=$((RANDOM % 10000 + 40000))
+
+    echo -e "  ➜ 正在塑造网道拓扑 (私网网段: 10.0.0.1/24)..."
+    cat > ${WG_DIR}/wg0.conf <<EOF
+[Interface]
+PrivateKey = ${SERV_PRIV_KEY}
+Address = 10.0.0.1/24
+ListenPort = ${LISTEN_PORT}
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o $(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1) -j MASQUERADE
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o $(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1) -j MASQUERADE
+
+[Peer]
+PublicKey = ${CLI_PUB_KEY}
+AllowedIPs = 10.0.0.2/32
+EOF
+
+    # 开启转发
+    echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-wg.conf
+    sysctl -p /etc/systemd/system/99-wg.conf &>/dev/null 2>&1
+
+    # 启动
+    systemctl enable --now wg-quick@wg0 &>/dev/null
+    
+    # 生成客户端配置
+    local CLIENT_CONF="[Interface]
+PrivateKey = ${CLI_PRIV_KEY}
+Address = 10.0.0.2/24
+DNS = 8.8.8.8
+MTU = 1420
+
+[Peer]
+PublicKey = ${SERV_PUB_KEY}
+Endpoint = ${SERVER_IP}:${LISTEN_PORT}
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25"
+
+    echo -e "\n${GREEN}🎉 WireGuard 基础设施搭建圆满完成！${NC}"
+    echo -e "${YELLOW}---------------- 客户端配置导出 (Mobile/PC) ----------------${NC}"
+    echo "$CLIENT_CONF"
+    echo -e "${YELLOW}----------------------------------------------------------${NC}"
+    
+    if command -v qrencode &>/dev/null; then
+        echo -e " 🤳 建议扫码快速添加配置:"
+        echo "$CLIENT_CONF" | qrencode -t ansiutf8
+    fi
+
+    read -p "配置已展示，按回车键返回..." < /dev/tty
+}
+
+# ================================================================
+# 2. 协议 B: Xray-Reality 自动化安装逻辑 (待实现后期补充)
+# ================================================================
+install_xray_reality() {
+    clear
+    echo -e "${CYAN}================ 核心部署: Xray REALITY (隐身协议) ================${NC}"
+    
+    # 获取加速镜像
+    local MIRROR=$(_get_gh_mirror)
+    
+    # 1. 获取最新版本并下载
+    echo -e "  ⏳ 正在检索 Xray 最新发布版..."
+    local XRAY_LATEST=$(curl -sL "https://api.github.com/repos/XTLS/Xray-core/releases/latest" | grep '"tag_name":' | head -1 | cut -d '"' -f 4)
+    [ -z "$XRAY_LATEST" ] && XRAY_LATEST="v1.8.4" # 兜底
+    
+    local DL_URL="${MIRROR}/XTLS/Xray-core/releases/download/${XRAY_LATEST}/Xray-linux-${XRAY_ARCH}.zip"
+    echo -e "  ➜ 目标版本: $XRAY_LATEST"
+    
+    rm -f /tmp/xray.zip && rm -rf /tmp/xray_temp
+    if ! curl -L -f -# -o /tmp/xray.zip "$DL_URL"; then
+        echo -e "${RED}致命错误: Xray 下载失败。${NC}"
+        return 1
+    fi
+
+    # 2. 安装二进制文件
+    mkdir -p /tmp/xray_temp && unzip -q /tmp/xray.zip -d /tmp/xray_temp
+    mkdir -p /usr/local/bin/xray-core /etc/xray
+    cp -f /tmp/xray_temp/xray /usr/local/bin/xray
+    chmod +x /usr/local/bin/xray
+
+    # 3. 核心配置生成 (REALITY)
+    local UUID=$(/usr/local/bin/xray uuid)
+    local KEYS=$(/usr/local/bin/xray x25519)
+    local PRIV_KEY=$(echo "$KEYS" | grep "Private key" | awk '{print $3}')
+    local PUB_KEY=$(echo "$KEYS" | grep "Public key" | awk '{print $3}')
+    local SHORT_ID=$(head /dev/urandom | tr -dc 'a-f0-9' | head -c 8)
+    local PORT=$((RANDOM % 10000 + 30000))
+    local SERVER_IP=$(curl -s ip.sb || curl -s ifconfig.me)
+    local DEST_SERVER="www.microsoft.com:443"
+
+    cat > /etc/xray/config.json <<EOF
+{
+    "log": {"loglevel": "warning"},
+    "inbounds": [{
+        "port": ${PORT},
+        "protocol": "vless",
+        "settings": {
+            "clients": [{"id": "${UUID}", "flow": "xtls-rprx-vision"}],
+            "decryption": "none"
+        },
+        "streamSettings": {
+            "network": "tcp",
+            "security": "reality",
+            "realitySettings": {
+                "show": false,
+                "dest": "${DEST_SERVER}",
+                "xver": 0,
+                "serverNames": ["www.microsoft.com"],
+                "privateKey": "${PRIV_KEY}",
+                "shortIds": ["${SHORT_ID}"]
+            }
+        }
+    }],
+    "outbounds": [{"protocol": "freedom"}]
+}
+EOF
+
+    # 4. 注册服务
+    cat > /etc/systemd/system/xray.service <<EOF
+[Unit]
+Description=Xray Service
+After=network.target nss-lookup.target
+
+[Service]
+User=root
+ExecStart=/usr/local/bin/xray run -config /etc/xray/config.json
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=infinity
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable --now xray &>/dev/null
+
+    # 5. 导出配置地址
+    local VLESS_URL="vless://${UUID}@${SERVER_IP}:${PORT}?security=reality&encryption=none&pbk=${PUB_KEY}&headerType=none&fp=chrome&spx=%2F&type=tcp&sni=www.microsoft.com&sid=${SHORT_ID}&flow=xtls-rprx-vision#Linux-ops-VPN"
+
+    echo -e "\n${GREEN}🎉 Xray-Reality 代理矩阵已架设完成！${NC}"
+    echo -e "${YELLOW}---------------- 客户端连接链接 (VLESS) ----------------${NC}"
+    echo -e "${CYAN}${VLESS_URL}${NC}"
+    echo -e "${YELLOW}--------------------------------------------------------${NC}"
+    
+    if command -v qrencode &>/dev/null; then
+        echo -e " 🤳 建议扫码快速导入客户端 (V2RayNG/v2box/Shadowrocket):"
+        echo "$VLESS_URL" | qrencode -t ansiutf8
+    fi
+
+    read -p "安装工作已就绪，按回车返回菜单..." < /dev/tty
+}
+
+# ================================================================
+# 0. 巡航管理主循环
+# ================================================================
+while true; do
+    clear
+    echo -e "${GREEN}======================================================${NC}"
+    echo -e "${GREEN}       VPS-VPN 专家工具箱 (Linux-ops-box)             ${NC}"
+    echo -e "${GREEN}======================================================${NC}"
+    # 基础状态概览
+    local WG_S="停止"
+    systemctl is-active wg-quick@wg0 &>/dev/null && WG_S="${GREEN}运行中${NC}"
+    
+    echo -e " 🛡  WireGuard 状态: $WG_S"
+    echo -e "${GREEN}------------------------------------------------------${NC}"
+    echo " 1. 部署/更新 WireGuard (极速 VPN)"
+    echo " 2. 部署/更新 Xray-Reality (流量隐形代理)"
+    echo " 3. 系统 BBR 加速自检与开启"
+    echo " 4. 彻底卸载所有 VPN/代理组件"
+    echo " 0. 退出工具箱"
+    echo -e "${GREEN}======================================================${NC}"
+    read -p "请选择交互选项 [0-4]: " main_choice < /dev/tty
+
+    case "$main_choice" in
+        1) install_wireguard ;;
+        2) install_xray_reality ;;
+        3) check_and_enable_bbr ;;
+        4) 
+            clear
+            echo -e "${RED}==================== 危险: 彻底卸载 VPN 组件 ====================${NC}"
+            read -p " 是否确认彻底清除系统中的 VPN/Proxy 核心? (y/N) " un_conf < /dev/tty
+            if [[ "$un_conf" =~ ^[Yy]$ ]]; then
+                echo -e "${YELLOW} [1/2] 正在剥离 WireGuard 链路...${NC}"
+                wg-quick down wg0 &>/dev/null
+                systemctl disable --now wg-quick@wg0 &>/dev/null
+                rm -rf /etc/wireguard
+                
+                echo -e "${YELLOW} [2/2] 正在关停 Xray 代理矩阵...${NC}"
+                systemctl disable --now xray &>/dev/null
+                rm -f /etc/systemd/system/xray.service
+                rm -rf /etc/xray /usr/local/bin/xray
+                
+                systemctl daemon-reload
+                echo -e "${GREEN} 所有 VPN 组件已从系统总线移除。${NC}"
+            fi
+            read -p "按回车键返回..." < /dev/tty
+            ;;
+        0) exit 0 ;;
+        *) echo -e "${RED} 无效参数${NC}"; sleep 1 ;;
+    esac
+done

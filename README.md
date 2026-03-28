@@ -7,11 +7,11 @@
 - **多发行版兼容**: 深度适配 Ubuntu/Debian/CentOS/Rocky/Armbian/Alpine，自动识别底层包管理器（apt/dnf/yum/apk）。
 - **完全解耦的架构**: 主程序仅 200 行负责 TUI 菜单分发，各类功能下沉至 `modules/` 子模块，互不干扰。
 - **透明审计**: 所有状态输出通过专门的日志基座 `common.sh`，实现控制台高亮输出与 `/var/log/ck_system_init.log` 原文存档双写。
-- **独立专家级工具**: 为高频组件（如 Docker）提供完全独立的、具备实时版本采集能力的安装与管理脚本。
+- **独立专家级工具**: 为高频组件（如 Docker/VPN）提供完全独立的、具备实时版本采集能力的安装与管理脚本。
 
 ---
 
-## 🚀 1. 系统初始化工具箱 (ck_ck_sysinit)
+## 🚀 1. 系统初始化工具箱 (ck_sysinit)
 
 用于服务器首选的初始化流程，包括 SSH 安全防范、网络配置、系统优化等。
 
@@ -19,7 +19,7 @@
 ```bash
 curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_system.sh | sudo bash
 ```
-> 安装完成后，在任何目录输入 `ck_ck_sysinit` 即可呼出管理菜单。
+> 安装完成后，在任何目录输入 `ck_sysinit` 即可呼出管理菜单。
 
 ---
 
@@ -36,6 +36,22 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 1. **实时采集**: 自动从 Docker 官网与 Github API 抓取最近 8 个稳定版本供选择。
 2. **状态感知**: 启动即显示当前引擎版本、运行状态与编排工具状态。
 3. **运维集成**: 内置启动、停止、重启、查看 `daemon.json` 等高频运维指令。
+
+---
+
+## 🛡 3. VPS-VPN 专家工具 (install_vpn.sh)
+
+为您的 VPS 提供医疗级加密隧道与隐身代理。内置 WireGuard (高速) & Xray-Reality (隐身) 双协议支持。
+
+### 快捷运行 (支持扫码一键联):
+```bash
+curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_vpn.sh | sudo bash
+```
+
+### 核心功能:
+1. **WireGuard (UDP 隧道)**: 内核级负载，一键生成服务端/客户端密钥及防火墙策略。
+2. **Xray-Reality (TCP 代理)**: 极致防探测加密，直接伪装知名网站（Reality），支持控制台打印码/链接。
+3. **BBR 内核加速**: 自动探测并开启 BBR 算法，优化跨国高延迟链路的传输带宽占用。
 
 ---
 
