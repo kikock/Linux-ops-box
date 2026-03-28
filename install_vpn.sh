@@ -19,6 +19,19 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
+# 自动包管理器检测
+if command -v apt-get &>/dev/null; then
+    PKG_MGR="apt-get"
+elif command -v dnf &>/dev/null; then
+    PKG_MGR="dnf"
+elif command -v yum &>/dev/null; then
+    PKG_MGR="yum"
+elif command -v apk &>/dev/null; then
+    PKG_MGR="apk"
+else
+    PKG_MGR="echo"
+fi
+
 # 基础环境架构自摸
 ARCH=$(uname -m)
 XRAY_ARCH="64"
@@ -237,6 +250,86 @@ EOF
 }
 
 # ================================================================
+# 3. 游戏联机环境与网速诊断工具
+# ================================================================
+network_diagnosis() {
+    clear
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "${CYAN}       游戏联机环境与网速诊断工具             ${NC}"
+    echo -e "${CYAN}======================================================${NC}"
+
+    # 检测 bc 依赖
+    if ! command -v bc &>/dev/null; then
+        echo -e "  ⏳ 正在补充依赖 [bc] ..."
+        ${PKG_MGR} install -y bc &>/dev/null
+    fi
+
+    # 1. 本机 IP 与地理位置信息
+    echo -e "${YELLOW}[1] 本机网络身份探测:${NC}"
+    local IP_INFO=$(curl -s -m 5 https://ipapi.co/json/ 2>/dev/null)
+    if [ -n "$IP_INFO" ]; then
+        local CUR_IP=$(echo "$IP_INFO" | grep -oE '"ip": "[^"]+"' | cut -d'"' -f4)
+        local ORG=$(echo "$IP_INFO" | grep -oE '"org": "[^"]+"' | cut -d'"' -f4)
+        local CITY=$(echo "$IP_INFO" | grep -oE '"city": "[^"]+"' | cut -d'"' -f4)
+        local COUNTRY=$(echo "$IP_INFO" | grep -oE '"country_name": "[^"]+"' | cut -d'"' -f4)
+        echo -e "    公网 IP: ${GREEN}$CUR_IP${NC}"
+        echo -e "    运营商:  ${GREEN}$ORG${NC}"
+        echo -e "    所在地:  ${GREEN}$CITY, $COUNTRY${NC}"
+    else
+        echo -e "    ${RED}✗ 无法连接到 IP 探测服务 (超时)${NC}"
+    fi
+    echo ""
+
+    # 2. 游戏平台核心节点延迟测试 (Ping)
+    test_ping() {
+        local name=$1
+        local host=$2
+        echo -n -e "    测试 ${CYAN}%-15s${NC} -> " "$name"
+        local result=$(ping -c 4 -W 2 "$host" 2>/dev/null | tail -1 | awk -F '/' '{print $5}')
+        if [ -n "$result" ]; then
+            if (( $(echo "$result < 50" | bc -l) )); then
+                echo -e "${GREEN}${result} ms (极佳)${NC}"
+            elif (( $(echo "$result < 150" | bc -l) )); then
+                echo -e "${YELLOW}${result} ms (一般)${NC}"
+            else
+                echo -e "${RED}${result} ms (高延迟)${NC}"
+            fi
+        else
+            echo -e "${RED}超时 (无法访问)${NC}"
+        fi
+    }
+
+    echo -e "${YELLOW}[2] 游戏平台联机节点延迟 (Latency):${NC}"
+    test_ping "Switch eShop" "ctest.cdn.nintendo.net"
+    test_ping "PSN Store"    "us.np.community.playstation.net"
+    test_ping "Xbox Live"    "xboxlive.com"
+    test_ping "Steam Global" "steampowered.com"
+    echo ""
+
+    # 3. 下载速度测试
+    echo -e "${YELLOW}[3] 基础带宽下载速度检测:${NC}"
+    if command -v speedtest-cli &>/dev/null; then
+        speedtest-cli --simple
+    else
+        echo -n "    正在通过标准节点拉取测速文件 (10MB)... "
+        local START_TIME=$(date +%s)
+        if curl -s -o /dev/null http://speedtest.tele2.net/10MB.zip; then
+            local END_TIME=$(date +%s)
+            local DIFF_TIME=$((END_TIME - START_TIME))
+            [ $DIFF_TIME -le 0 ] && DIFF_TIME=1
+            local SPEED=$((10 / DIFF_TIME))
+            echo -e "${GREEN}${SPEED} MB/s${NC}"
+        else
+            echo -e "${RED}测速失败 (网络不通)${NC}"
+        fi
+    fi
+
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "${YELLOW}提示: 若 NS 联机 NAT 类型不理想，请检查 WireGuard 的 UDP 转发。${NC}"
+    read -p "诊断完成，按回车键返回菜单..." < /dev/tty
+}
+
+# ================================================================
 # 0. 巡航管理主循环
 # ================================================================
 while true; do
@@ -254,9 +347,10 @@ while true; do
     echo " 2. 部署/更新 Xray-Reality (流量隐形代理)"
     echo " 3. 系统 BBR 加速自检与开启"
     echo " 4. 彻底卸载所有 VPN/代理组件"
+    echo " 5. 运行游戏联机与网速诊断"
     echo " 0. 退出工具箱"
     echo -e "${GREEN}======================================================${NC}"
-    read -p "请选择交互选项 [0-4]: " main_choice < /dev/tty
+    read -p "请选择交互选项 [0-5]: " main_choice < /dev/tty
 
     case "$main_choice" in
         1) install_wireguard ;;
@@ -282,6 +376,7 @@ while true; do
             fi
             read -p "按回车键返回..." < /dev/tty
             ;;
+        5) network_diagnosis ;;
         0) exit 0 ;;
         *) echo -e "${RED} 无效参数${NC}"; sleep 1 ;;
     esac
