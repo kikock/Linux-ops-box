@@ -29,9 +29,7 @@ fi
 if [ -f "$BASE_DIR/modules/ssh_sec.sh" ]; then
     source "$BASE_DIR/modules/ssh_sec.sh"
 fi
-if [ -f "$BASE_DIR/modules/docker_app.sh" ]; then
-    source "$BASE_DIR/modules/docker_app.sh"
-fi
+
 if [ -f "$BASE_DIR/modules/network.sh" ]; then
     source "$BASE_DIR/modules/network.sh"
 fi
@@ -182,7 +180,7 @@ while true; do
     echo -e "${GREEN}==============================================${NC}"
     echo " 1. 查看系统详细信息"
     echo " 2. SSH 远程连接管理 (含证书配置)"
-    echo " 3. Docker 管理 (安装/卸载/命令/Web)"
+
     echo " 4. 系统软件包更新"
     echo " 5. 系统环境优化 (源/BBR/Swap/时区)"
     echo " 6. 网络 IP 配置 (静态IP/DHCP)"
@@ -195,7 +193,7 @@ while true; do
     case $choice in
         1) show_sys_info ;;
         2) ssh_menu ;;
-        3) docker_menu ;;
+
         4) update_system_packages ;;
         5) system_optimization_menu ;;
         6) network_menu ;;
