@@ -43,11 +43,16 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
         echo -e "${RED}警告: 无法探测到 Github，请确认宿主机网络配置或代理。${NC}"
     fi
 
+    # 加入对国内友好的 Github 全局加速代理路线
+    local GH_MIRROR="https://ghproxy.net/https://github.com"
+    local TAR_URL="$GH_MIRROR/kikock/Linux-ops-box/archive/refs/heads/main.tar.gz"
+    local ZIP_URL="$GH_MIRROR/kikock/Linux-ops-box/archive/refs/heads/main.zip"
+    
     # 优先尝试 curl 配合 tar (最常见组合)
     if command -v curl &>/dev/null && command -v tar &>/dev/null; then
-        echo -e "  ➜ 引擎: curl + tar \n  ⏳ 正在跨海下载系统镜像压缩包，请耐心等待进度条走完（若卡住不动请 Ctrl+C 终止并检查 Github 连通性）..."
+        echo -e "  ➜ 引擎: curl + tar (默认启用全局镜像加速机制) \n  ⏳ 正在下载系统镜像压缩包，请耐心等待进度条走完（若卡住不动请 Ctrl+C 终止并检查网络连通性）..."
         rm -rf /tmp/Linux-ops-box-main /tmp/ops-box.tar.gz
-        curl -L -# -o /tmp/ops-box.tar.gz "https://github.com/kikock/Linux-ops-box/archive/refs/heads/main.tar.gz"
+        curl -L -# -o /tmp/ops-box.tar.gz "$TAR_URL"
         
         echo -e "  ⏳ 正在解压系统内核引擎..."
         mkdir -p /tmp/Linux-ops-box-main
@@ -55,18 +60,18 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
         SRC_DIR="/tmp/Linux-ops-box-main/system"
         
     elif command -v wget &>/dev/null && command -v unzip &>/dev/null; then
-        echo -e "  ➜ 引擎: wget + unzip \n  ⏳ 正在跨海下载系统镜像压缩包，若卡住请耐心等待或检查 Github 连通性..."
+        echo -e "  ➜ 引擎: wget + unzip (默认启用全局镜像加速机制) \n  ⏳ 正在下载系统镜像压缩包，若卡住请耐心等待..."
         rm -rf /tmp/Linux-ops-box-main /tmp/ops-box.zip
-        wget -O /tmp/ops-box.zip --show-progress "https://github.com/kikock/Linux-ops-box/archive/refs/heads/main.zip"
+        wget -O /tmp/ops-box.zip --show-progress "$ZIP_URL"
         
         echo -e "  ⏳ 正在解压系统内核引擎..."
         unzip -q /tmp/ops-box.zip -d /tmp/
         SRC_DIR="/tmp/Linux-ops-box-main/system"
         
     elif command -v git &>/dev/null; then
-        echo -e "  ➜ 引擎: git clone \n  ⏳ 正在从 Github 拉取源码库仓库..."
+        echo -e "  ➜ 引擎: git clone (默认启用全局镜像加速机制) \n  ⏳ 正在拉取源码库仓库..."
         rm -rf /tmp/Linux-ops-box
-        git clone --progress "$REPO_URL" /tmp/Linux-ops-box
+        git clone --progress "$GH_MIRROR/kikock/Linux-ops-box.git" /tmp/Linux-ops-box
         SRC_DIR="/tmp/Linux-ops-box/system"
         
     else
