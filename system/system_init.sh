@@ -15,7 +15,8 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # 动态挂载共享组件库 (包含全局参数、日志基座跨平台诊断 _init_distro)
-BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 解决 sysinit 全局软链接调用时的上下文飘移问题
+BASE_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 if [ -f "$BASE_DIR/modules/common.sh" ]; then
     source "$BASE_DIR/modules/common.sh"
 else
