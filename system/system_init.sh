@@ -51,6 +51,10 @@ OS_NAME="${DISTRO_NAME:-未知}"
 KERNEL=$(uname -r)
 ARCH=$(uname -m)
 IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
+# 获取默认网卡 MAC 地址
+PRIMARY_IF=$(ip route get 1.1.1.1 2>/dev/null | awk '/dev/ {print $5}' | head -1)
+[ -z "$PRIMARY_IF" ] && PRIMARY_IF=$(ls /sys/class/net/ | grep -v "lo" | head -1)
+MAC_ADDR=$(cat /sys/class/net/${PRIMARY_IF}/address 2>/dev/null || echo "未知")
 CPU_MODEL=$(lscpu 2>/dev/null | grep -E "^Model name|^型号" | head -1 | cut -d: -f2 | xargs)
 [ -z "$CPU_MODEL" ] && CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
 [ -z "$CPU_MODEL" ] && CPU_MODEL="未知处理器"
@@ -76,6 +80,18 @@ _update_live_data() {
         MEM_PCT=0; MEM_STR="无法获取"
     fi
 
+    # Swap 占用
+    local SWAP_RAW
+    SWAP_RAW=$(free 2>/dev/null | grep -E "^Swap|^交换")
+    local SWAP_TOTAL_KB=$(echo "$SWAP_RAW" | awk '{print $2}')
+    local SWAP_USED_KB=$(echo "$SWAP_RAW" | awk '{print $3}')
+    if [ -n "$SWAP_TOTAL_KB" ] && [ "$SWAP_TOTAL_KB" -gt 0 ]; then
+        SWAP_PCT=$((SWAP_USED_KB * 100 / SWAP_TOTAL_KB))
+        SWAP_STR=$(free -h 2>/dev/null | grep -E "^Swap|^交换" | awk '{printf "%s / %s", $3, $2}')
+    else
+        SWAP_PCT=0; SWAP_STR="未启用或无法获取"
+    fi
+
     # 磁盘 (总 / 已用)
     DISK_LIVE=$(df -h / 2>/dev/null | awk 'NR==2{printf "%s / %s (%s)", $3, $2, $5}')
 }
@@ -85,11 +101,12 @@ _draw_menu_header() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e " ${GREEN}●${NC} 系统环境: ${GREEN}${OS_NAME} (${ARCH})${NC}"
     echo -e " ${GREEN}●${NC} 内核版本: ${KERNEL}"
-    echo -e " ${GREEN}●${NC} 内网地址: ${YELLOW}${IP_ADDR:-未知}${NC}"
+    echo -e " ${GREEN}●${NC} 网路负载: ${YELLOW}IP: ${IP_ADDR:-未知} ${NC}| ${YELLOW}MAC: ${MAC_ADDR}${NC}"
     echo -e "${CYAN}────────────────────────────────────────────────────${NC}"
     echo -e " ${CYAN}●${NC} CPU 负载: ${CYAN}${LOAD_LIVE}${NC}"
-    echo -e " ${CYAN}●${NC} 运行时间: ${UPTIME_LIVE}"
+    echo -e " ${CYAN}●${NC} 系统运行: ${UPTIME_LIVE}"
     echo -e " ${CYAN}●${NC} 内存占用: ${MEM_STR} (${MEM_PCT}%)"
+    echo -e " ${CYAN}●${NC} 交换分区: ${SWAP_STR} (${SWAP_PCT}%)"
     echo -e " ${CYAN}●${NC} 磁盘空间: ${DISK_LIVE}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
