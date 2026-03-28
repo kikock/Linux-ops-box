@@ -7,7 +7,7 @@
 - **多发行版兼容**: 深度适配 Ubuntu/Debian/CentOS/Rocky/Armbian/Alpine，自动识别底层包管理器（apt/dnf/yum/apk）。
 - **完全解耦的架构**: 主程序仅 200 行负责 TUI 菜单分发，各类功能下沉至 `modules/` 子模块，互不干扰。
 - **透明审计**: 所有状态输出通过专门的日志基座 `common.sh`，实现控制台高亮输出与 `/var/log/ck_system_init.log` 原文存档双写。
-- **独立专家级工具**: 为高频组件（如 Docker/VPN）提供完全独立的、具备实时版本采集能力的安装与管理脚本。
+- **独立专家级工具**: 为高频组件（如 Docker/VPN/代理）提供完全独立的、具备实时版本采集能力的安装与管理脚本。
 
 ---
 
@@ -41,7 +41,7 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 
 ## 🛡 3. VPS-VPN 专家工具 (install_vpn.sh)
 
-为您的 VPS 提供医疗级加密隧道与隐身代理。内置 WireGuard (高速) & Xray-Reality (隐身) 双协议支持。
+为您的 VPS 提供医疗级加密隧道与隐身代理。内置 WireGuard & Xray-Reality 协议支持及深度网络诊断。
 
 ### 快捷运行 (支持扫码一键联):
 ```bash
@@ -50,8 +50,25 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 
 ### 核心功能:
 1. **WireGuard (UDP 隧道)**: 内核级负载，一键生成服务端/客户端密钥及防火墙策略。
-2. **Xray-Reality (TCP 代理)**: 极致防探测加密，直接伪装知名网站（Reality），支持控制台打印码/链接。
-3. **BBR 内核加速**: 自动探测并开启 BBR 算法，优化跨国高延迟链路的传输带宽占用。
+2. **Xray-Reality (TCP 代理)**: 极致防探测加密，直接伪装知名网站，支持控制台打印码/链接。
+3. **游戏联机与网速诊断**: 针对 Nintendo / PSN / Xbox / Steam 等平台节点的一键延迟与带宽检测。
+4. **域名路由链路分析**: 结合 HTTP 响应拆解 (DNS/TCP/TTFB)、Traceroute 染色路径图与 MTR 丢包扫描。
+
+---
+
+## 🛸 4. NaiveProxy 自动化安装 (naive_install.sh)
+
+基于 Caddy 补丁版的极致隐身代理方案，采用 HTTP/3 协议栈，目前是最难以被感知的代理分发技术。
+
+### 快捷安装 (大陆加速版):
+```bash
+curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/scripts/naive_install.sh | sudo bash
+```
+
+### 核心功能:
+1. **二合一部署**: 脚本支持在部署 NaiveProxy 的同时，同步开启标准 **HTTP 认证代理** 模式。
+2. **SSL 自动签证**: 自动申请 Let's Encrypt 证书，并配置强化的伪装站点。
+3. **极致性能**: 自动注入 BBR 加速参数，适配最前沿的 Caddy forwardproxy 插件。
 
 ---
 
