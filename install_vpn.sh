@@ -286,13 +286,17 @@ network_diagnosis() {
     test_ping() {
         local name=$1
         local host=$2
-        # 修正：printf 必须单独调用，且 %-15s 是 printf 的特权
         printf "    测试 ${CYAN}%-15s${NC} -> " "$name"
         
+        # 预检：DNS 是否能解析
+        if ! host "$host" &>/dev/null && ! ping -c 1 -W 1 "$host" &>/dev/null; then
+            echo -e "${RED}域名无法解析 (DNS 故障)${NC}"
+            return
+        fi
+
         # 兼容性 Ping 解析逻辑 (针对不同 OS 输出)
         local ping_out=$(ping -c 4 -W 2 "$host" 2>/dev/null)
         local result=$(echo "$ping_out" | tail -1 | grep '/' | awk -F '/' '{print $5}')
-        # 如果 awk 解析失败 (部分系统格式不同)，尝试二次提取
         [ -z "$result" ] && result=$(echo "$ping_out" | grep 'avg' | awk -F'/' '{print $5}')
 
         if [ -n "$result" ]; then
@@ -304,15 +308,15 @@ network_diagnosis() {
                 echo -e "${RED}${result} ms (高延迟)${NC}"
             fi
         else
-            echo -e "${RED}超时 (无法访问)${NC}"
+            echo -e "${RED}超时 (节点防火墙阻断)${NC}"
         fi
     }
 
     echo -e "${YELLOW}[2] 游戏平台联机节点延迟 (Latency):${NC}"
     test_ping "Switch eShop" "ctest.cdn.nintendo.net"
-    test_ping "PSN Store"    "us.np.community.playstation.net"
-    test_ping "Xbox Live"    "xboxlive.com"
-    test_ping "Steam Global" "steampowered.com"
+    test_ping "PSN Store"    "gs-sec.ww.np.dl.playstation.net"
+    test_ping "Xbox Live"    "xsts.auth.xboxlive.com"
+    test_ping "Steam Global" "steamcommunity.com"
     echo ""
 
     # 3. 下载速度测试
@@ -324,12 +328,15 @@ network_diagnosis() {
         # 使用 Cloudflare 边缘节点测速，更真实反映国际带宽
         local SPEED_INFO=$(curl -L -s -o /dev/null -w "%{speed_download}" --max-time 15 https://speed.cloudflare.com/__down?bytes=10485760)
         
+        # 算力换算与着色优化
         if [ -n "$SPEED_INFO" ] && (( $(echo "$SPEED_INFO > 0" | bc -l) )); then
-            # 换算为 MB/s (1048576 = 1MB)
             local MB_PER_SEC=$(echo "scale=2; $SPEED_INFO / 1048576" | bc -l)
-            echo -e "${GREEN}${MB_PER_SEC} MB/s${NC}"
+            local S_COLOR="${RED}"
+            if (( $(echo "$MB_PER_SEC > 2" | bc -l) )); then S_COLOR="${YELLOW}"; fi
+            if (( $(echo "$MB_PER_SEC > 10" | bc -l) )); then S_COLOR="${GREEN}"; fi
+            echo -e "${S_COLOR}${MB_PER_SEC} MB/s${NC}"
         else
-            echo -e "${RED}测速失败 (节点连接超时)${NC}"
+            echo -e "${RED}测速异常 (请检查链路或 DNS)${NC}"
         fi
     fi
 
@@ -361,35 +368,47 @@ domain_route_analysis() {
     local DOMAIN=$(echo $TARGET | sed -e 's|^[^/]*//||' -e 's|/.*$||')
 
     # --- 第一部分：HTTP 响应时间拆解 ---
-    echo -e "\n${YELLOW}[1] HTTP 链路响应拆解:${NC}"
-    curl -o /dev/null -s -w \
-        "    DNS 解析:   ${CYAN}%{time_namelookup} s${NC}\n\
-    TCP 握手:   ${CYAN}%{time_connect} s${NC}\n\
-    首字节响应: ${CYAN}%{time_starttransfer} s${NC}\n\
-    总计耗时:   ${GREEN}%{time_total} s${NC}\n" \
-        -L --max-time 10 "http://$DOMAIN"
+    echo -e "\n${YELLOW}[1] HTTP 链路响应拆解 (测算中...):${NC}"
+    # 捕获 curl 数据
+    local CURL_DATA=$(curl -L -o /dev/null -s -w "%{time_namelookup}|%{time_connect}|%{time_starttransfer}|%{time_total}" --max-time 10 "http://$DOMAIN")
+    
+    # 拆解变量
+    IFS='|' read -r DNS_T TCP_T TTFB_T TOTAL_T <<< "$CURL_DATA"
+
+    # 判定是否连接失败 (如果总时间 >= 10 且后续阶段为 0)
+    if (( $(echo "$TOTAL_T >= 10" | bc -l) )) && (( $(echo "$TCP_T == 0" | bc -l) )); then
+        echo -e "    状态反馈:   ${RED}⚠ 目标连接超时或 80 端口未开放${NC}"
+    else
+        printf "    %-12s: %s s\n" "DNS 解析" "${CYAN}${DNS_T}${NC}"
+        printf "    %-12s: %s s\n" "TCP 握手" "${CYAN}${TCP_T}${NC}"
+        printf "    %-12s: %s s\n" "首字节响应" "${CYAN}${TTFB_T}${NC}"
+        printf "    %-12s: %s s\n" "总计耗时" "${GREEN}${TOTAL_T}${NC}"
+    fi
 
     # --- 第二部分：路由图 (Traceroute) ---
-    echo -e "${YELLOW}[2] 路由追踪路径图 (Traceroute):${NC}"
-    echo -e "${BLUE}序号   IP 地址            节点延迟 (RTT)${NC}"
-    echo -e "------------------------------------------------------"
+    echo -e "\n${YELLOW}[2] 路由追踪路径图 (Traceroute):${NC}"
+    printf "  ${BLUE}%-4s  %-20s    %-15s${NC}\n" "跳数" "节点 IP" "节点延迟 (RTT)"
+    echo -e "  ------------------------------------------------------"
     traceroute -q 1 -w 1 -n "$DOMAIN" 2>/dev/null | awk '
         NR>1 {
             if ($2 == "*") {
-                printf "  %-4s  %-15s    %s\n", $1, "* * *", "请求超时"
+                printf "  %-4s  %-20s    %s\n", $1, "* * *", "请求超时"
             } else {
                 color="'${GREEN}'"; 
-                if ($3 > 100) color="'${RED}'";
-                printf "  %-4s  %-15s    %s%s ms%s\n", $1, $2, color, $3, "'${NC}'"
+                if ($3 > 80) color="'${YELLOW}'";
+                if ($3 > 160) color="'${RED}'";
+                printf "  %-4s  %-20s    %b%s ms%b\n", $1, $2, color, $3, "'${NC}'"
             }
         }
     '
-    echo -e "------------------------------------------------------"
+    echo -e "  ------------------------------------------------------"
 
     # --- 第三部分：动态链路稳定性测试 (MTR) ---
-    echo -e "\n${YELLOW}[3] 链路丢包率与稳定性检测 (MTR 10次轮询):${NC}"
+    echo -e "\n${YELLOW}[3] 稳定性深度扫描 (MTR 10轮):${NC}"
+    printf "  ${BLUE}%-40s  %-10s  %-8s${NC}\n" "中继节点 (Gateway)" "丢包 (Loss)" "均值 (Avg)"
     mtr -rw -c 10 "$DOMAIN" | tail -n +2 | awk '{
-        printf "  节点: %-18s  丢包: %-4s  平均延迟: %-6s\n", $2, $3, $6
+        loss_color="'${GREEN}'"; if($3 > 5) loss_color="'${YELLOW}'"; if($3 > 20) loss_color="'${RED}'";
+        printf "  %-40s  %b%-6s%b  %-8s ms\n", $2, loss_color, $3"%", "'${NC}'", $6
     }'
 
     echo -e "\n${CYAN}======================================================${NC}"
