@@ -44,130 +44,68 @@ if [ -f "$BASE_DIR/modules/firewall_mgmt.sh" ]; then
 fi
 
 # ================================================================
-# 启动时系统摘要 (进入脚本第一屏)
+# 1. 静态环境参数自检 (只在启动时检索 1 次，缓存以提升性能)
 # ================================================================
+_log_info "正在采集硬件指纹与网络拓扑..."
+OS_NAME="${DISTRO_NAME:-未知}"
+KERNEL=$(uname -r)
+ARCH=$(uname -m)
+IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
+CPU_MODEL=$(lscpu 2>/dev/null | grep -E "^Model name|^型号" | head -1 | cut -d: -f2 | xargs)
+[ -z "$CPU_MODEL" ] && CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
+[ -z "$CPU_MODEL" ] && CPU_MODEL="未知处理器"
+
+# ----------------------------------------------------------------
+# 2. 动态指标仪表盘逻辑
+# ----------------------------------------------------------------
+_update_live_data() {
+    # 负载与 Uptime
+    LOAD_LIVE=$(uptime | awk -F'load average:' '{print $2}' | xargs)
+    UPTIME_LIVE=$(uptime -p 2>/dev/null | sed 's/up //')
+    [ -z "$UPTIME_LIVE" ] && UPTIME_LIVE=$(uptime | awk -F',' '{print $1}' | sed 's/.*up //')
+
+    # 内存 (总 / 已用) + 百分比
+    local MEM_RAW
+    MEM_RAW=$(free 2>/dev/null | grep -E "^Mem|^内存")
+    local MEM_TOTAL_KB=$(echo "$MEM_RAW" | awk '{print $2}')
+    local MEM_USED_KB=$(echo "$MEM_RAW" | awk '{print $3}')
+    if [ -n "$MEM_TOTAL_KB" ] && [ "$MEM_TOTAL_KB" -gt 0 ]; then
+        MEM_PCT=$((MEM_USED_KB * 100 / MEM_TOTAL_KB))
+        MEM_STR=$(free -h 2>/dev/null | grep -E "^Mem|^内存" | awk '{printf "%s / %s", $3, $2}')
+    else
+        MEM_PCT=0; MEM_STR="无法获取"
+    fi
+
+    # 磁盘 (总 / 已用)
+    DISK_LIVE=$(df -h / 2>/dev/null | awk 'NR==2{printf "%s / %s (%s)", $3, $2, $5}')
+}
+
+_draw_menu_header() {
+    _update_live_data
+    echo -e "${CYAN}┌────────────────────────────────────────────────────┐${NC}"
+    printf "${CYAN}│${NC}  %-50s ${CYAN}│${NC}\n" "系统: ${GREEN}${OS_NAME} (${ARCH})${NC}"
+    printf "${CYAN}│${NC}  %-44s ${CYAN}│${NC}\n" "内核: ${KERNEL}"
+    printf "${CYAN}│${NC}  %-44s ${CYAN}│${NC}\n" "内网 IP: ${YELLOW}${IP_ADDR:-未知}${NC}"
+    echo -e "${CYAN}├────────────────────────────────────────────────────┤${NC}"
+    printf "${CYAN}│${NC}  CPU 负载: %-38s ${CYAN}│${NC}\n" "${CYAN}${LOAD_LIVE}${NC}"
+    printf "${CYAN}│${NC}  运行时间: %-44s ${CYAN}│${NC}\n" "${UPTIME_LIVE}"
+    printf "${CYAN}│${NC}  内存占用: %-42s ${CYAN}│${NC}\n" "${MEM_STR} (${MEM_PCT}%)"
+    printf "${CYAN}│${NC}  磁盘空间: %-44s ${CYAN}│${NC}\n" "${DISK_LIVE}"
+    echo -e "${CYAN}└────────────────────────────────────────────────────┘${NC}"
+}
+
+# --- MODULE SETUP COMPLETE ---
 _show_startup_banner() {
     clear
     echo -e "${CYAN}======================================================${NC}"
     echo -e "${CYAN}      Linux 系统初始化工具箱 v2.0 - By kikock      ${NC}"
     echo -e "${CYAN}======================================================${NC}"
-
-    local OS_NAME="${DISTRO_NAME:-未知}"
-    local KERNEL
-    KERNEL=$(uname -r)
-    local ARCH
-    ARCH=$(uname -m)
-    local IP_ADDR
-    IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
-    local UPTIME_STR
-    UPTIME_STR=$(uptime -p 2>/dev/null || uptime | awk -F',' '{print $1}' | sed 's/.*up /up /')
-
-    # 内存
-    local MEM_LINE
-    MEM_LINE=$(free -h 2>/dev/null | awk '/Mem|内存/{print $2" 总 /",$3" 用"}')
-    [ -z "$MEM_LINE" ] && MEM_LINE="(无法读取)"
-
-    # 磁盘
-    local DISK_USAGE
-    DISK_USAGE=$(df -h / 2>/dev/null | awk 'NR==2{print $3"/"$2" ("$5")"}')
-
-    echo -e " ${YELLOW}系统:${NC}  $OS_NAME"
-    echo -e " ${YELLOW}内核:${NC}  $KERNEL  ${YELLOW}架构:${NC} $ARCH"
-    echo -e " ${YELLOW}内存:${NC}  $MEM_LINE"
-    echo -e " ${YELLOW}磁盘:${NC}  $DISK_USAGE"
-    echo -e " ${YELLOW}IP:${NC}    $IP_ADDR"
-    echo -e " ${YELLOW}运行:${NC}  $UPTIME_STR"
-    echo -e " ${YELLOW}包管理:${NC} ${PKG_MGR}  ${YELLOW}发行族:${NC} ${DISTRO_FAMILY}"
-    echo -e "${CYAN}======================================================${NC}"
+    echo -e " ${GREEN}[INFO]${NC} 正在进入 TUI 交互式管理面板..."
+    echo ""
+    _draw_menu_header
+    echo -e "${YELLOW}提示: 此面板中的数据将在每次操作后自动刷新。${NC}"
     echo ""
     read -p "按回车键进入管理菜单..." < /dev/tty
-}
-
-# 1. 查看系统信息函数
-show_sys_info() {
-    clear
-    echo -e "${BLUE}================ 系统详细信息 ================${NC}"
-
-    # 操作系统
-    local OS_NAME="${DISTRO_NAME:-}"
-    [ -z "$OS_NAME" ] && OS_NAME=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
-    [ -z "$OS_NAME" ] && OS_NAME="未知"
-
-    local KERNEL
-    KERNEL=$(uname -r)
-    local ARCH
-    ARCH=$(uname -m)
-
-    # CPU 型号 (兼容 lscpu 和 /proc/cpuinfo)
-    local CPU_MODEL
-    if command -v lscpu &>/dev/null; then
-        CPU_MODEL=$(lscpu 2>/dev/null | grep -E "^Model name|^型号" | head -1 | cut -d: -f2 | xargs)
-    fi
-    [ -z "$CPU_MODEL" ] && CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
-    [ -z "$CPU_MODEL" ] && CPU_MODEL="未知"
-
-    # CPU 核心数
-    local CPU_CORES
-    CPU_CORES=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "?")
-
-    # 内存 (兼容 free -h 的不同输出格式)
-    local MEM_TOTAL MEM_USED MEM_FREE
-    local MEM_LINE
-    MEM_LINE=$(free -h 2>/dev/null | grep -E "^Mem|^内存" || free -h 2>/dev/null | sed -n '2p')
-    MEM_TOTAL=$(echo "$MEM_LINE" | awk '{print $2}')
-    MEM_USED=$(echo "$MEM_LINE"  | awk '{print $3}')
-    MEM_FREE=$(echo "$MEM_LINE"  | awk '{print $4}')
-
-    # Swap
-    local SWAP_TOTAL SWAP_USED
-    local SWAP_LINE
-    SWAP_LINE=$(free -h 2>/dev/null | grep -E "^Swap|^交换" || free -h 2>/dev/null | sed -n '3p')
-    SWAP_TOTAL=$(echo "$SWAP_LINE" | awk '{print $2}')
-    SWAP_USED=$(echo "$SWAP_LINE"  | awk '{print $3}')
-
-    # 磁盘
-    local DISK_INFO
-    DISK_INFO=$(df -h / 2>/dev/null | awk 'NR==2{print $3"/"$2" ("$5")"}')
-
-    # 网络 IP
-    local IP_ADDR
-    IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
-
-    # 运行时间
-    local UPTIME
-    UPTIME=$(uptime -p 2>/dev/null || uptime | awk -F',' '{print $1}' | sed 's/.*up /up /')
-
-    # 系统负载
-    local LOAD
-    LOAD=$(uptime | awk -F'[,:]' '{print $(NF-2)","$(NF-1)","$NF}' | xargs)
-
-    # 核心温度 (兼容多平台)
-    local TEMP="未知"
-    for zone in /sys/class/thermal/thermal_zone*/temp; do
-        [ -f "$zone" ] && TEMP=$(awk '{printf "%.1f°C", $1/1000}' "$zone") && break
-    done
-    # Raspberry Pi 温度读取
-    if command -v vcgencmd &>/dev/null; then
-        TEMP=$(vcgencmd measure_temp 2>/dev/null | grep -oE '[0-9.]+' | head -1)
-        [ -n "$TEMP" ] && TEMP="${TEMP}°C (RPi)"
-    fi
-
-    # 输出
-    echo -e "${YELLOW}操作系统:${NC}  $OS_NAME"
-    echo -e "${YELLOW}发行族:${NC}    $DISTRO_FAMILY  (包管理: $PKG_MGR)"
-    echo -e "${YELLOW}内核版本:${NC}  $KERNEL"
-    echo -e "${YELLOW}系统架构:${NC}  $ARCH"
-    echo -e "${YELLOW}处理器:${NC}    $CPU_MODEL ($CPU_CORES 核)"
-    echo -e "${YELLOW}系统负载:${NC}  $LOAD"
-    echo -e "${YELLOW}根分区:${NC}    $DISK_INFO"
-    echo -e "${YELLOW}物理内存:${NC}  $MEM_TOTAL (已用: $MEM_USED / 空闲: $MEM_FREE)"
-    echo -e "${YELLOW}虚拟内存:${NC}  $SWAP_TOTAL (已用: $SWAP_USED)"
-    echo -e "${YELLOW}核心温度:${NC}  $TEMP"
-    echo -e "${YELLOW}内网 IP:${NC}   $IP_ADDR"
-    echo -e "${YELLOW}运行时间:${NC}  $UPTIME"
-    echo -e "${BLUE}==============================================${NC}"
-    echo ""
-    read -p "按回车键返回主菜单..." < /dev/tty
 }
 
 # --- MODULE SETUP COMPLETE ---
@@ -176,32 +114,27 @@ _show_startup_banner
 # 主菜单循环
 while true; do
     clear
-    echo -e "${GREEN}==============================================${NC}"
-    echo -e "${GREEN}   Linux 系统初始化工具箱 - By kikock        ${NC}"
-    echo -e "${GREEN}   系统: ${YELLOW}${DISTRO_NAME:-未知}${GREEN}${NC}"
-    echo -e "${GREEN}   包管理: ${YELLOW}${PKG_MGR}${GREEN}  发行族: ${YELLOW}${DISTRO_FAMILY}${NC}"
-    echo -e "${GREEN}==============================================${NC}"
-    echo " 1. 查看系统详细信息"
-    echo " 2. SSH 远程连接管理 (含证书配置)"
-    echo " 3. 系统软件包更新"
-    echo " 4. 系统环境优化 (源/BBR/Swap/时区)"
-    echo " 5. 网络 IP 配置 (静态IP/DHCP)"
-    echo " 6. Nginx 配置查看"
-    echo " 7. 安装常用软件包 (针对最小化系统)"
-    echo " 8. 防火墙管理中心 (UFW / FirewallD)"
-    echo " 0. 退出脚本"
-    echo -e "${GREEN}==============================================${NC}"
-    read -p "请输入选项 [0-8]: " choice < /dev/tty
+    _draw_menu_header
+    echo -e "${GREEN}================== 运维指令中心 ==================${NC}"
+    echo " 1. SSH 远程安全配置 (证书/端口/防爆破)"
+    echo " 2. 系统软件包更新 (清理冗余/内核升级)"
+    echo " 3. 系统环境优化 (源/BBR/Swap/时区)"
+    echo " 4. 网络 IP 管理 (静态IP/网卡诊断)"
+    echo " 5. Nginx 站点配置透视"
+    echo " 6. 常用专家工具集安装 (最小化系统必备)"
+    echo " 7. 防火墙安全管理中心 (UFW/FirewallD)"
+    echo " 0. 退出工具箱"
+    echo -e "${GREEN}==================================================${NC}"
+    read -p "请输入指令编号 [0-7]: " choice < /dev/tty
 
     case $choice in
-        1) show_sys_info ;;
-        2) ssh_menu ;;
-        3) update_system_packages ;;
-        4) system_optimization_menu ;;
-        5) network_menu ;;
-        6) nginx_menu ;;
-        7) install_common_tools ;;
-        8) firewall_menu ;;
+        1) ssh_menu ;;
+        2) update_system_packages ;;
+        3) system_optimization_menu ;;
+        4) network_menu ;;
+        5) nginx_menu ;;
+        6) install_common_tools ;;
+        7) firewall_menu ;;
         0) echo -e "${BLUE}感谢使用，再见！- kikock${NC}"; exit 0 ;;
         *) echo -e "${RED}输入无效，请重新选择。${NC}" ; sleep 1 ;;
     esac
