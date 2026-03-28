@@ -113,6 +113,12 @@ cp -a "$SRC_DIR/system_init.sh" "$TARGET_OPT/"
 if [ -d "$SRC_DIR/modules" ]; then
     cp -r -a "$SRC_DIR/modules" "$TARGET_OPT/"
 fi
+# 同步离线安装包或额外资源文件夹 (如 docker) 如果存在的话
+for extra_dir in docker nginx static config; do
+    if [ -d "$SRC_DIR/$extra_dir" ]; then
+        cp -r -a "$SRC_DIR/$extra_dir" "$TARGET_OPT/"
+    fi
+done
 
 # 赋予执行权限
 chmod +x "$TARGET_OPT/system_init.sh"

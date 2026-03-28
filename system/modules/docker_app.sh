@@ -7,11 +7,11 @@ install_docker_offline() {
     fi
 
     read -p "请输入 Docker 离线包名称 (如 docker-26.1.3.tgz): " TAR_NAME
-    TAR_FILE="./docker/$TAR_NAME"
-    TEMP_DIR="./dockerApp"
+    TAR_FILE="$BASE_DIR/docker/$TAR_NAME"
+    TEMP_DIR="$BASE_DIR/dockerApp"
     
     if [ ! -f "$TAR_FILE" ]; then
-        echo -e "${RED}错误: 在 ./docker/ 目录下找不到文件 $TAR_NAME${NC}"
+        echo -e "${RED}错误: 在 $BASE_DIR/docker/ 目录下找不到文件 $TAR_NAME${NC}"
         return
     fi
 
@@ -48,12 +48,12 @@ install_docker_offline() {
         cp "$TEMP_DIR/docker/"* /usr/bin/
     fi
 
-    # 核心组件来源: ./docker/ (用户指定的下级目录)
-    if [ -f "./docker/docker.service" ]; then
-        cp ./docker/docker.service /usr/lib/systemd/system/
+    # 核心组件来源: $BASE_DIR/docker/ (统一规范的内核引擎读取池)
+    if [ -f "$BASE_DIR/docker/docker.service" ]; then
+        cp "$BASE_DIR/docker/docker.service" /usr/lib/systemd/system/
         chmod +x /usr/lib/systemd/system/docker.service
     else
-        echo -e "${RED}警告: 在 ./docker/ 目录下未发现 docker.service 文件。${NC}"
+        echo -e "${RED}警告: 在 $BASE_DIR/docker/ 目录下未发现 docker.service 文件。${NC}"
     fi
 
     echo -e "${YELLOW}正在加载配置并启动/重启 Docker 服务...${NC}"
@@ -62,10 +62,10 @@ install_docker_offline() {
     systemctl restart docker
     systemctl enable docker.service
 
-    # 安装 docker-compose (来源: ./docker/)
-    if [ -f "./docker/docker-compose" ]; then
+    # 安装 docker-compose (来源: $BASE_DIR/docker/)
+    if [ -f "$BASE_DIR/docker/docker-compose" ]; then
         echo -e "${YELLOW}配置 docker-compose...${NC}"
-        cp ./docker/docker-compose /usr/local/bin/
+        cp "$BASE_DIR/docker/docker-compose" /usr/local/bin/
         chmod +x /usr/local/bin/docker-compose
         ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
     fi
@@ -132,9 +132,9 @@ install_docker_fast_web() {
     fi
     
     # 检查 docker-fast.yml 是否存在
-    YML_FILE="./docker/docker-fast.yml"
+    YML_FILE="$BASE_DIR/docker/docker-fast.yml"
     if [ ! -f "$YML_FILE" ]; then
-        echo -e "${RED}错误: 在 ./docker/ 目录下找不到 docker-fast.yml 文件。${NC}"
+        echo -e "${RED}错误: 在 $BASE_DIR/docker/ 目录下找不到 docker-fast.yml 文件。${NC}"
         return
     fi
     
