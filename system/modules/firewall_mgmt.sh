@@ -21,33 +21,58 @@ _get_fw_driver() {
 fw_show_status() {
     local driver=$(_get_fw_driver)
     clear
-    echo -e "${BLUE}================ 当前防火墙状态 ================${NC}"
+    echo -e "${BLUE}================== 当前防火墙状态 ==================${NC}"
 
     case "$driver" in
         ufw)
-            local status_raw=$(ufw status verbose 2>/dev/null)
-            if echo "$status_raw" | grep -q "Status: active"; then
-                echo -e "驱动类型: ${CYAN}UFW${NC}  状态: ${GREEN}[已启用]${NC}"
-                echo -e "规则列表:"
-                ufw status numbered
+            if ufw status | grep -q "active"; then
+                echo -e "驱动方案: ${CYAN}UFW (Debian/Ubuntu 体系)${NC}"
+                echo -e "当前状态: ${GREEN}[ 已开启 ]${NC}"
+                echo -e "----------------------------------------------------"
+                # 增强版 UFW 输出：对 ALLOW/DENY 进行染色
+                ufw status numbered | while read -r line; do
+                    if [[ "$line" =~ "ALLOW" ]]; then
+                        echo -e "  ${GREEN}$line${NC}"
+                    elif [[ "$line" =~ "DENY" ]]; then
+                        echo -e "  ${RED}$line${NC}"
+                    else
+                        echo -e "  $line"
+                    fi
+                done
             else
-                echo -e "驱动类型: ${CYAN}UFW${NC}  状态: ${RED}[已停用]${NC}"
+                echo -e "驱动方案: ${CYAN}UFW${NC}  当前状态: ${RED}[ 已停用 ]${NC}"
             fi
             ;;
         firewalld)
             if systemctl is-active --quiet firewalld 2>/dev/null; then
-                echo -e "驱动类型: ${CYAN}FirewallD${NC}  状态: ${GREEN}[已启用]${NC}"
-                echo -e "规则列表 (Public Zone):"
-                firewall-cmd --list-all 2>/dev/null | grep -E "services|ports|protocols|masquerade"
+                echo -e "驱动方案: ${CYAN}FirewallD (RedHat/CentOS 体系)${NC}"
+                echo -e "当前状态: ${GREEN}[ 已开启 ]${NC}"
+                echo -e "----------------------------------------------------"
+                local zone=$(firewall-cmd --get-active-zones 2>/dev/null | head -1 | awk '{print $1}')
+                zone=${zone:-public}
+                printf "  %-14s: ${YELLOW}%s${NC}\n" "活跃区域" "$zone"
+                
+                local services=$(firewall-cmd --zone=$zone --list-services 2>/dev/null | xargs)
+                local ports=$(firewall-cmd --zone=$zone --list-ports 2>/dev/null | xargs)
+                
+                [ -n "$services" ] && printf "  %-14s: %s\n" "➜ 🌐 [已放行服务]" "${YELLOW}$services${NC}"
+                [ -n "$ports" ]    && printf "  %-14s: %s\n" "➜ 🔌 [已放行端口]" "${YELLOW}$ports${NC}"
+                
+                local masq=$(firewall-cmd --zone=$zone --query-masquerade 2>/dev/null)
+                if [ "$masq" = "yes" ]; then
+                    printf "  %-14s: ${GREEN}已开启 (Active)${NC}\n" "➜ 🎭 [网关伪装]"
+                else
+                    printf "  %-14s: ${NC}未开启${NC}\n" "➜ 🎭 [网关伪装]"
+                fi
             else
-                echo -e "驱动类型: ${CYAN}FirewallD${NC}  状态: ${RED}[已停用]${NC}"
+                echo -e "驱动方案: ${CYAN}FirewallD${NC}  当前状态: ${RED}[ 已停用 ]${NC}"
             fi
             ;;
         *)
-            echo -e "${RED}错误: 未能在系统中探测到支持的防火墙驱动 (UFW 或 FirewallD)。${NC}"
+            echo -e "当前状态: ${RED}[ 未安装受支持的防火墙类型 ]${NC}"
             ;;
     esac
-    echo -e "${BLUE}==============================================${NC}"
+    echo -e "${BLUE}====================================================${NC}"
     echo ""
     read -p "按回车键返回..." < /dev/tty
 }
