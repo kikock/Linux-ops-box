@@ -38,19 +38,36 @@ fi
 if [ "$HAS_LOCAL_FILES" = false ]; then
     echo -e "${YELLOW}[云端库检测] 未在当前目录发现源码，尝试从 Github 为您实时静默下载...${NC}"
     
-    # 检查网络连通性
-    if ! curl -Is https://github.com | head -1 | grep -q "200"; then
-        echo -e "${RED}警告: 无法探测到 Github，请确认宿主机网络配置或代理。${NC}"
+    # 动态探测并自适应 Github 访问路线
+    GH_MIRROR="https://github.com"
+    echo -e "  ⏳ 正在探测 Github 官方直连可用性..."
+    
+    # 连通性探测：使用 3秒超时 尝试访问目标仓库
+    if command -v curl &>/dev/null; then
+        if curl -Is -m 3 "https://github.com/kikock/Linux-ops-box" | head -1 | grep -qE 'HTTP/.*(200|301|302)'; then
+            echo -e "${GREEN}  ✓ Github 官方通道顺畅，已启用直连模式。${NC}"
+        else
+            echo -e "${YELLOW}  ⚠ Github 直连受阻或超时，自动为您切换国内加速镜像池 (ghproxy.net)...${NC}"
+            GH_MIRROR="https://ghproxy.net/https://github.com"
+        fi
+    elif command -v wget &>/dev/null; then
+        if wget --spider -q -T 3 "https://github.com/kikock/Linux-ops-box"; then
+            echo -e "${GREEN}  ✓ Github 官方通道顺畅，已启用直连模式。${NC}"
+        else
+            echo -e "${YELLOW}  ⚠ Github 直连受阻或超时，自动为您切换国内加速镜像池 (ghproxy.net)...${NC}"
+            GH_MIRROR="https://ghproxy.net/https://github.com"
+        fi
+    else
+        GH_MIRROR="https://ghproxy.net/https://github.com"
     fi
 
-    # 加入对国内友好的 Github 全局加速代理路线
-    local GH_MIRROR="https://ghproxy.net/https://github.com"
-    local TAR_URL="$GH_MIRROR/kikock/Linux-ops-box/archive/refs/heads/main.tar.gz"
-    local ZIP_URL="$GH_MIRROR/kikock/Linux-ops-box/archive/refs/heads/main.zip"
+    TAR_URL="$GH_MIRROR/kikock/Linux-ops-box/archive/refs/heads/main.tar.gz"
+    ZIP_URL="$GH_MIRROR/kikock/Linux-ops-box/archive/refs/heads/main.zip"
+    GIT_REPO_URL="$GH_MIRROR/kikock/Linux-ops-box.git"
     
     # 优先尝试 curl 配合 tar (最常见组合)
     if command -v curl &>/dev/null && command -v tar &>/dev/null; then
-        echo -e "  ➜ 引擎: curl + tar (默认启用全局镜像加速机制) \n  ⏳ 正在下载系统镜像压缩包，请耐心等待进度条走完（若卡住不动请 Ctrl+C 终止并检查网络连通性）..."
+        echo -e "  ➜ 引擎: curl + tar \n  ⏳ 正在下载系统镜像压缩包，请耐心等待进度条走完（若卡住不动请 Ctrl+C 终止并检查网络连通性）..."
         rm -rf /tmp/Linux-ops-box-main /tmp/ops-box.tar.gz
         curl -L -# -o /tmp/ops-box.tar.gz "$TAR_URL"
         
@@ -60,7 +77,7 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
         SRC_DIR="/tmp/Linux-ops-box-main/system"
         
     elif command -v wget &>/dev/null && command -v unzip &>/dev/null; then
-        echo -e "  ➜ 引擎: wget + unzip (默认启用全局镜像加速机制) \n  ⏳ 正在下载系统镜像压缩包，若卡住请耐心等待..."
+        echo -e "  ➜ 引擎: wget + unzip \n  ⏳ 正在下载系统镜像压缩包，若卡住请耐心等待..."
         rm -rf /tmp/Linux-ops-box-main /tmp/ops-box.zip
         wget -O /tmp/ops-box.zip --show-progress "$ZIP_URL"
         
@@ -69,9 +86,9 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
         SRC_DIR="/tmp/Linux-ops-box-main/system"
         
     elif command -v git &>/dev/null; then
-        echo -e "  ➜ 引擎: git clone (默认启用全局镜像加速机制) \n  ⏳ 正在拉取源码库仓库..."
+        echo -e "  ➜ 引擎: git clone \n  ⏳ 正在拉取源码库仓库..."
         rm -rf /tmp/Linux-ops-box
-        git clone --progress "$GH_MIRROR/kikock/Linux-ops-box.git" /tmp/Linux-ops-box
+        git clone --progress "$GIT_REPO_URL" /tmp/Linux-ops-box
         SRC_DIR="/tmp/Linux-ops-box/system"
         
     else
