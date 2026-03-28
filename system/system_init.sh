@@ -39,6 +39,9 @@ fi
 if [ -f "$BASE_DIR/modules/system_opt.sh" ]; then
     source "$BASE_DIR/modules/system_opt.sh"
 fi
+if [ -f "$BASE_DIR/modules/firewall_mgmt.sh" ]; then
+    source "$BASE_DIR/modules/firewall_mgmt.sh"
+fi
 
 # ================================================================
 # 启动时系统摘要 (进入脚本第一屏)
@@ -185,9 +188,10 @@ while true; do
     echo " 5. 网络 IP 配置 (静态IP/DHCP)"
     echo " 6. Nginx 配置查看"
     echo " 7. 安装常用软件包 (针对最小化系统)"
+    echo " 8. 防火墙管理中心 (UFW / FirewallD)"
     echo " 0. 退出脚本"
     echo -e "${GREEN}==============================================${NC}"
-    read -p "请输入选项 [0-7]: " choice < /dev/tty
+    read -p "请输入选项 [0-8]: " choice < /dev/tty
 
     case $choice in
         1) show_sys_info ;;
@@ -197,6 +201,7 @@ while true; do
         5) network_menu ;;
         6) nginx_menu ;;
         7) install_common_tools ;;
+        8) firewall_menu ;;
         0) echo -e "${BLUE}感谢使用，再见！- kikock${NC}"; exit 0 ;;
         *) echo -e "${RED}输入无效，请重新选择。${NC}" ; sleep 1 ;;
     esac
