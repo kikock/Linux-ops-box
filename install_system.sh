@@ -45,22 +45,30 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
 
     # 优先尝试 curl 配合 tar (最常见组合)
     if command -v curl &>/dev/null && command -v tar &>/dev/null; then
-        echo -e "  ➜ 引擎: curl + tar"
-        rm -rf /tmp/Linux-ops-box-main
+        echo -e "  ➜ 引擎: curl + tar \n  ⏳ 正在跨海下载系统镜像压缩包，请耐心等待进度条走完（若卡住不动请 Ctrl+C 终止并检查 Github 连通性）..."
+        rm -rf /tmp/Linux-ops-box-main /tmp/ops-box.tar.gz
+        curl -L -# -o /tmp/ops-box.tar.gz "https://github.com/kikock/Linux-ops-box/archive/refs/heads/main.tar.gz"
+        
+        echo -e "  ⏳ 正在解压系统内核引擎..."
         mkdir -p /tmp/Linux-ops-box-main
-        curl -sSL "https://github.com/kikock/Linux-ops-box/archive/refs/heads/main.tar.gz" | tar -xz -C /tmp
+        tar -xzf /tmp/ops-box.tar.gz -C /tmp
         SRC_DIR="/tmp/Linux-ops-box-main/system"
+        
     elif command -v wget &>/dev/null && command -v unzip &>/dev/null; then
-        echo -e "  ➜ 引擎: wget + unzip"
+        echo -e "  ➜ 引擎: wget + unzip \n  ⏳ 正在跨海下载系统镜像压缩包，若卡住请耐心等待或检查 Github 连通性..."
         rm -rf /tmp/Linux-ops-box-main /tmp/ops-box.zip
-        wget -qO /tmp/ops-box.zip "https://github.com/kikock/Linux-ops-box/archive/refs/heads/main.zip"
+        wget -O /tmp/ops-box.zip --show-progress "https://github.com/kikock/Linux-ops-box/archive/refs/heads/main.zip"
+        
+        echo -e "  ⏳ 正在解压系统内核引擎..."
         unzip -q /tmp/ops-box.zip -d /tmp/
         SRC_DIR="/tmp/Linux-ops-box-main/system"
+        
     elif command -v git &>/dev/null; then
-        echo -e "  ➜ 引擎: git clone"
+        echo -e "  ➜ 引擎: git clone \n  ⏳ 正在从 Github 拉取源码库仓库..."
         rm -rf /tmp/Linux-ops-box
-        git clone -q "$REPO_URL" /tmp/Linux-ops-box
+        git clone --progress "$REPO_URL" /tmp/Linux-ops-box
         SRC_DIR="/tmp/Linux-ops-box/system"
+        
     else
         echo -e "${RED}致命错误: 您的系统环境既没有 git，也没有 curl/tar 或 wget/unzip 组合，无法实现在线下载！${NC}"
         echo -e "解决办法: 请先使用系统包管理器安装 curl 或是手工下载。${NC}"
