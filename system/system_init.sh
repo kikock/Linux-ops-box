@@ -180,25 +180,23 @@ while true; do
     echo -e "${GREEN}==============================================${NC}"
     echo " 1. 查看系统详细信息"
     echo " 2. SSH 远程连接管理 (含证书配置)"
-
-    echo " 4. 系统软件包更新"
-    echo " 5. 系统环境优化 (源/BBR/Swap/时区)"
-    echo " 6. 网络 IP 配置 (静态IP/DHCP)"
-    echo " 7. Nginx 配置查看"
-    echo " 8. 安装常用软件包 (针对最小化系统)"
+    echo " 3. 系统软件包更新"
+    echo " 4. 系统环境优化 (源/BBR/Swap/时区)"
+    echo " 5. 网络 IP 配置 (静态IP/DHCP)"
+    echo " 6. Nginx 配置查看"
+    echo " 7. 安装常用软件包 (针对最小化系统)"
     echo " 0. 退出脚本"
     echo -e "${GREEN}==============================================${NC}"
-    read -p "请输入选项 [0-8]: " choice
+    read -p "请输入选项 [0-7]: " choice
 
     case $choice in
         1) show_sys_info ;;
         2) ssh_menu ;;
-
-        4) update_system_packages ;;
-        5) system_optimization_menu ;;
-        6) network_menu ;;
-        7) nginx_menu ;;
-        8) install_common_tools ;;
+        3) update_system_packages ;;
+        4) system_optimization_menu ;;
+        5) network_menu ;;
+        6) nginx_menu ;;
+        7) install_common_tools ;;
         0) echo -e "${BLUE}感谢使用，再见！- kikock${NC}"; exit 0 ;;
         *) echo -e "${RED}输入无效，请重新选择。${NC}" ; sleep 1 ;;
     esac
