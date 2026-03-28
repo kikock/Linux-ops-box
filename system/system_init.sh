@@ -118,11 +118,10 @@ _update_live_data
 # 主菜单循环
 while true; do
     clear
-    _draw_menu_header
     echo -e "${CYAN}======================================================${NC}"
     echo -e "${CYAN}      Linux 系统初始化工具箱 v2.0 - By kikock      ${NC}"
     echo -e "${CYAN}======================================================${NC}"
-     _draw_menu_header
+    _draw_menu_header
     echo -e "${GREEN}================== 运维指令中心 ==================${NC}"
     echo " 1. SSH 远程安全配置 (证书/端口/防爆破)"
     echo " 2. 系统软件包更新 (清理冗余/内核升级)"
