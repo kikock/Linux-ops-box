@@ -1,0 +1,106 @@
+#!/bin/bash
+# =================================================================
+# 脚本名称: install_system.sh
+# 描述: Linux-ops-box 在线快速安装部署程序
+# 功能: 支持跨网端 curl 直装或本地 clone 目录自适应安装
+# =================================================================
+
+# 定义颜色
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+echo -e "${BLUE}==============================================${NC}"
+echo -e "${GREEN}      Linux-ops-box 终极运维工具箱快捷部署     ${NC}"
+echo -e "${BLUE}==============================================${NC}"
+
+# 1. 权限检测
+if [[ $EUID -ne 0 ]]; then
+   echo -e "${RED}错误: 安装向导需要 root 权限，请使用 sudo 执行 (例如: curl ... | sudo bash)。${NC}"
+   exit 1
+fi
+
+TARGET_OPT="/opt/tk_sysinit"
+TARGET_BIN="/usr/local/bin/sysinit"
+REPO_URL="https://github.com/kikock/Linux-ops-box.git"
+
+# 2. 核心源码定位：自动判定是本地执行还是云端 curl 管道执行
+HAS_LOCAL_FILES=false
+if [ -d "$PWD/system" ] && [ -f "$PWD/system/system_init.sh" ]; then
+    HAS_LOCAL_FILES=true
+    SRC_DIR="$PWD/system"
+    echo -e "${GREEN}[本地源码检测] 发现 system/ 目录，将使用本地直接安装...${NC}"
+fi
+
+if [ "$HAS_LOCAL_FILES" = false ]; then
+    echo -e "${YELLOW}[云端库检测] 未在当前目录发现源码，尝试从 Github 为您实时静默下载...${NC}"
+    
+    # 检查网络连通性
+    if ! curl -Is https://github.com | head -1 | grep -q "200"; then
+        echo -e "${RED}警告: 无法探测到 Github，请确认宿主机网络配置或代理。${NC}"
+    fi
+
+    # 优先尝试 curl 配合 tar (最常见组合)
+    if command -v curl &>/dev/null && command -v tar &>/dev/null; then
+        echo -e "  ➜ 引擎: curl + tar"
+        rm -rf /tmp/Linux-ops-box-main
+        mkdir -p /tmp/Linux-ops-box-main
+        curl -sSL "https://github.com/kikock/Linux-ops-box/archive/refs/heads/main.tar.gz" | tar -xz -C /tmp
+        SRC_DIR="/tmp/Linux-ops-box-main/system"
+    elif command -v wget &>/dev/null && command -v unzip &>/dev/null; then
+        echo -e "  ➜ 引擎: wget + unzip"
+        rm -rf /tmp/Linux-ops-box-main /tmp/ops-box.zip
+        wget -qO /tmp/ops-box.zip "https://github.com/kikock/Linux-ops-box/archive/refs/heads/main.zip"
+        unzip -q /tmp/ops-box.zip -d /tmp/
+        SRC_DIR="/tmp/Linux-ops-box-main/system"
+    elif command -v git &>/dev/null; then
+        echo -e "  ➜ 引擎: git clone"
+        rm -rf /tmp/Linux-ops-box
+        git clone -q "$REPO_URL" /tmp/Linux-ops-box
+        SRC_DIR="/tmp/Linux-ops-box/system"
+    else
+        echo -e "${RED}致命错误: 您的系统环境既没有 git，也没有 curl/tar 或 wget/unzip 组合，无法实现在线下载！${NC}"
+        echo -e "解决办法: 请先使用系统包管理器安装 curl 或是手工下载。${NC}"
+        exit 1
+    fi
+    
+    if [ ! -d "$SRC_DIR" ] || [ ! -f "$SRC_DIR/system_init.sh" ]; then
+        echo -e "${RED}致命错误: 从 Github 源码下载失败，网络离线或仓库尚未公开！${NC}"
+        exit 1
+    fi
+fi
+
+# 3. 开始最终部署
+echo -e "\n[1/3] 正在构建系统级守护库: ${TARGET_OPT} ..."
+mkdir -p "$TARGET_OPT"
+
+echo -e "[2/3] 正在同步核心微服务文件与外挂模块引擎 ..."
+# 覆盖同步所有主脚本及模块体系
+cp -a "$SRC_DIR/system_init.sh" "$TARGET_OPT/"
+if [ -d "$SRC_DIR/modules" ]; then
+    cp -r -a "$SRC_DIR/modules" "$TARGET_OPT/"
+fi
+
+# 赋予执行权限
+chmod +x "$TARGET_OPT/system_init.sh"
+for sh_file in "$TARGET_OPT"/modules/*.sh; do
+    [ -f "$sh_file" ] && chmod +x "$sh_file"
+done
+
+echo -e "[3/3] 正在向上编译链接统全局调令符 ..."
+ln -sf "$TARGET_OPT/system_init.sh" "$TARGET_BIN"
+
+# 清理临时下载痕迹 (如果是云端拉取)
+if [ "$HAS_LOCAL_FILES" = false ]; then
+    rm -rf /tmp/Linux-ops-box-main /tmp/ops-box.zip /tmp/Linux-ops-box
+fi
+
+echo -e "\n${GREEN}==============================================${NC}"
+echo -e "${GREEN}🎉 恭喜！「自动化系统运维工具箱」全模块安装穿透成功！${NC}"
+echo -e "您现在可以在当前操作系统的 ${YELLOW}任意目录、任意位置${NC} 敲击以下指令快速呼出 TUI 控制台：\n"
+echo -e "  🔥  ${CYAN}sysinit${NC}"
+echo -e "\n${BLUE}==============================================${NC}"
+exit 0
