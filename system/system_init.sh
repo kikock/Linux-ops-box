@@ -82,16 +82,16 @@ _update_live_data() {
 
 _draw_menu_header() {
     _update_live_data
-    echo -e "${CYAN}┌────────────────────────────────────────────────────┐${NC}"
-    printf "${CYAN}│${NC}  系统: ${GREEN}%-44s${NC} ${CYAN}│${NC}\n" "${OS_NAME} (${ARCH})"
-    printf "${CYAN}│${NC}  内核: %-44s ${CYAN}│${NC}\n" "${KERNEL}"
-    printf "${CYAN}│${NC}  内网 IP: ${YELLOW}%-39s${NC} ${CYAN}│${NC}\n" "${IP_ADDR:-未知}"
-    echo -e "${CYAN}├────────────────────────────────────────────────────┤${NC}"
-    printf "${CYAN}│${NC}  CPU 负载: ${CYAN}%-38s${NC} ${CYAN}│${NC}\n" "${LOAD_LIVE}"
-    printf "${CYAN}│${NC}  运行时间: %-44s ${CYAN}│${NC}\n" "${UPTIME_LIVE}"
-    printf "${CYAN}│${NC}  内存占用: %-44s ${CYAN}│${NC}\n" "${MEM_STR} (${MEM_PCT}%)"
-    printf "${CYAN}│${NC}  磁盘空间: %-44s ${CYAN}│${NC}\n" "${DISK_LIVE}"
-    echo -e "${CYAN}└────────────────────────────────────────────────────┘${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e " ${GREEN}●${NC} 系统环境: ${GREEN}${OS_NAME} (${ARCH})${NC}"
+    echo -e " ${GREEN}●${NC} 内核版本: ${KERNEL}"
+    echo -e " ${GREEN}●${NC} 内网地址: ${YELLOW}${IP_ADDR:-未知}${NC}"
+    echo -e "${CYAN}────────────────────────────────────────────────────${NC}"
+    echo -e " ${CYAN}●${NC} CPU 负载: ${CYAN}${LOAD_LIVE}${NC}"
+    echo -e " ${CYAN}●${NC} 运行时间: ${UPTIME_LIVE}"
+    echo -e " ${CYAN}●${NC} 内存占用: ${MEM_STR} (${MEM_PCT}%)"
+    echo -e " ${CYAN}●${NC} 磁盘空间: ${DISK_LIVE}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
 # --- MODULE SETUP COMPLETE ---
