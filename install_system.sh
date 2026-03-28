@@ -26,6 +26,8 @@ fi
 TARGET_OPT="/opt/ck_sysinit"
 TARGET_BIN="/usr/local/bin/ck_sysinit"
 REPO_URL="https://github.com/kikock/Linux-ops-box.git"
+# 定义默认拉取分支 (正式版建议设为 main)
+REPO_BRANCH="dev1.0"
 
 # 2. 核心源码定位：自动判定是本地执行还是云端 curl 管道执行
 HAS_LOCAL_FILES=false
@@ -61,20 +63,20 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
         GH_MIRROR="https://ghproxy.net/https://github.com"
     fi
 
-    TAR_URL="$GH_MIRROR/kikock/Linux-ops-box/archive/refs/heads/main.tar.gz"
-    ZIP_URL="$GH_MIRROR/kikock/Linux-ops-box/archive/refs/heads/main.zip"
+    TAR_URL="$GH_MIRROR/kikock/Linux-ops-box/archive/refs/heads/${REPO_BRANCH}.tar.gz"
+    ZIP_URL="$GH_MIRROR/kikock/Linux-ops-box/archive/refs/heads/${REPO_BRANCH}.zip"
     GIT_REPO_URL="$GH_MIRROR/kikock/Linux-ops-box.git"
     
     # 优先尝试 curl 配合 tar (最常见组合)
     if command -v curl &>/dev/null && command -v tar &>/dev/null; then
-        echo -e "  ➜ 引擎: curl + tar \n  ⏳ 正在下载系统镜像压缩包，请耐心等待进度条走完（若卡住不动请 Ctrl+C 终止并检查网络连通性）..."
-        rm -rf /tmp/Linux-ops-box-main /tmp/ops-box.tar.gz
+        echo -e "  ➜ 引擎: curl + tar \n  ⏳ 正在下载系统镜像压缩包，请耐心等待进度条走完..."
+        rm -rf "/tmp/Linux-ops-box-${REPO_BRANCH}" /tmp/ops-box.tar.gz
         curl -L -# -o /tmp/ops-box.tar.gz "$TAR_URL"
         
         echo -e "  ⏳ 正在解压系统内核引擎..."
-        mkdir -p /tmp/Linux-ops-box-main
+        mkdir -p "/tmp/Linux-ops-box-${REPO_BRANCH}"
         tar -xzf /tmp/ops-box.tar.gz -C /tmp
-        SRC_DIR="/tmp/Linux-ops-box-main/system"
+        SRC_DIR="/tmp/Linux-ops-box-${REPO_BRANCH}/system"
         
     elif command -v wget &>/dev/null && command -v unzip &>/dev/null; then
         echo -e "  ➜ 引擎: wget + unzip \n  ⏳ 正在下载系统镜像压缩包，若卡住请耐心等待..."
@@ -86,9 +88,9 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
         SRC_DIR="/tmp/Linux-ops-box-main/system"
         
     elif command -v git &>/dev/null; then
-        echo -e "  ➜ 引擎: git clone \n  ⏳ 正在拉取源码库仓库..."
+        echo -e "  ➜ 引擎: git clone \n  ⏳ 正在拉取源码库仓库 [分支: ${REPO_BRANCH}]..."
         rm -rf /tmp/Linux-ops-box
-        git clone --progress "$GIT_REPO_URL" /tmp/Linux-ops-box
+        git clone --progress -b "${REPO_BRANCH}" "$GIT_REPO_URL" /tmp/Linux-ops-box
         SRC_DIR="/tmp/Linux-ops-box/system"
         
     else
@@ -133,7 +135,7 @@ ln -sf "$TARGET_OPT/system_init.sh" "$TARGET_BIN"
 
 # 清理临时下载痕迹 (如果是云端拉取)
 if [ "$HAS_LOCAL_FILES" = false ]; then
-    rm -rf /tmp/Linux-ops-box-main /tmp/ops-box.zip /tmp/Linux-ops-box
+    rm -rf "/tmp/Linux-ops-box-${REPO_BRANCH}" /tmp/ops-box.zip /tmp/Linux-ops-box /tmp/ops-box.tar.gz
 fi
 
 echo -e "\n${GREEN}==============================================${NC}"
