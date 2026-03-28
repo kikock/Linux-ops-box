@@ -83,33 +83,20 @@ _update_live_data() {
 _draw_menu_header() {
     _update_live_data
     echo -e "${CYAN}┌────────────────────────────────────────────────────┐${NC}"
-    printf "${CYAN}│${NC}  %-50s ${CYAN}│${NC}\n" "系统: ${GREEN}${OS_NAME} (${ARCH})${NC}"
-    printf "${CYAN}│${NC}  %-44s ${CYAN}│${NC}\n" "内核: ${KERNEL}"
-    printf "${CYAN}│${NC}  %-44s ${CYAN}│${NC}\n" "内网 IP: ${YELLOW}${IP_ADDR:-未知}${NC}"
+    printf "${CYAN}│${NC}  系统: ${GREEN}%-44s${NC} ${CYAN}│${NC}\n" "${OS_NAME} (${ARCH})"
+    printf "${CYAN}│${NC}  内核: %-44s ${CYAN}│${NC}\n" "${KERNEL}"
+    printf "${CYAN}│${NC}  内网 IP: ${YELLOW}%-39s${NC} ${CYAN}│${NC}\n" "${IP_ADDR:-未知}"
     echo -e "${CYAN}├────────────────────────────────────────────────────┤${NC}"
-    printf "${CYAN}│${NC}  CPU 负载: %-38s ${CYAN}│${NC}\n" "${CYAN}${LOAD_LIVE}${NC}"
+    printf "${CYAN}│${NC}  CPU 负载: ${CYAN}%-38s${NC} ${CYAN}│${NC}\n" "${LOAD_LIVE}"
     printf "${CYAN}│${NC}  运行时间: %-44s ${CYAN}│${NC}\n" "${UPTIME_LIVE}"
-    printf "${CYAN}│${NC}  内存占用: %-42s ${CYAN}│${NC}\n" "${MEM_STR} (${MEM_PCT}%)"
+    printf "${CYAN}│${NC}  内存占用: %-44s ${CYAN}│${NC}\n" "${MEM_STR} (${MEM_PCT}%)"
     printf "${CYAN}│${NC}  磁盘空间: %-44s ${CYAN}│${NC}\n" "${DISK_LIVE}"
     echo -e "${CYAN}└────────────────────────────────────────────────────┘${NC}"
 }
 
 # --- MODULE SETUP COMPLETE ---
-_show_startup_banner() {
-    clear
-    echo -e "${CYAN}======================================================${NC}"
-    echo -e "${CYAN}      Linux 系统初始化工具箱 v2.0 - By kikock      ${NC}"
-    echo -e "${CYAN}======================================================${NC}"
-    echo -e " ${GREEN}[INFO]${NC} 正在进入 TUI 交互式管理面板..."
-    echo ""
-    _draw_menu_header
-    echo -e "${YELLOW}提示: 此面板中的数据将在每次操作后自动刷新。${NC}"
-    echo ""
-    read -p "按回车键进入管理菜单..." < /dev/tty
-}
-
-# --- MODULE SETUP COMPLETE ---
-_show_startup_banner
+# 自动进入 TUI 面板
+_update_live_data
 
 # 主菜单循环
 while true; do
