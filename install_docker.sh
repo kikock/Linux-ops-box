@@ -68,7 +68,7 @@ check_docker_status() {
     fi
     
     echo -e "\n${CYAN}=========================================================${NC}"
-    read -p "按回车键返回菜单..."
+    read -p "按回车键返回菜单..." < /dev/tty
 }
 
 # ================================================================
@@ -87,7 +87,7 @@ manage_docker_service() {
         echo " 5. 禁用 开机自启"
         echo " 0. 返回上级"
         echo -e "${BLUE}=========================================================${NC}"
-        read -p "选择指令 [0-5]: " cmd_choice
+        read -p "选择指令 [0-5]: " cmd_choice < /dev/tty
         case $cmd_choice in
             1) systemctl start docker && echo -e "${GREEN}启动指令已发出。${NC}" ;;
             2) systemctl stop docker && echo -e "${YELLOW}停止指令已发出。${NC}" ;;
@@ -141,9 +141,9 @@ perform_install() {
     local DEFAULT_D="${D_VERSIONS[-1]}"
     local DEFAULT_C="${C_VERSIONS[0]}"
 
-    read -p "请输入 Docker 版本 (默认 $DEFAULT_D): " CHOSEN_D
+    read -p "请输入 Docker 版本 (默认 $DEFAULT_D): " CHOSEN_D < /dev/tty
     CHOSEN_D=${CHOSEN_D:-$DEFAULT_D}
-    read -p "请输入 Compose 版本 (默认 $DEFAULT_C): " CHOSEN_C
+    read -p "请输入 Compose 版本 (默认 $DEFAULT_C): " CHOSEN_C < /dev/tty
     CHOSEN_C=${CHOSEN_C:-$DEFAULT_C}
 
     echo -e "\n🚀 ${GREEN}任务开始: 安装 Docker $CHOSEN_D \u0026 Compose $CHOSEN_C${NC}"
@@ -205,7 +205,7 @@ EOF
     echo -e "\n${GREEN}🎉 部署完成! 当前系统响应:${NC}"
     docker -v
     docker-compose -v
-    read -p "安装工作已就绪，按回车返回菜单..."
+    read -p "安装工作已就绪，按回车返回菜单..." < /dev/tty
 }
 
 # ================================================================
@@ -215,7 +215,7 @@ perform_uninstall() {
     clear
     echo -e "${RED}==================== 危险: 彻底卸载 Docker ====================${NC}"
     echo -e " 该操作将停止所有正运行容器，并清除所有二进制程序与配置文件。"
-    read -p " 是否确认彻底清除系统中的 Docker? (y/N): " confirm_un
+    read -p " 是否确认彻底清除系统中的 Docker? (y/N): " confirm_un < /dev/tty
     if [[ "$confirm_un" =~ ^[Yy]$ ]]; then
         echo -e "${YELLOW} [1/3] 停止并禁用 Docker 服务层...${NC}"
         systemctl stop docker 2>/dev/null
@@ -232,24 +232,38 @@ perform_uninstall() {
     else
         echo -e " 已取消操作。"
     fi
-    read -p "按回车键返回菜单..."
+    read -p "按回车键返回菜单..." < /dev/tty
 }
 
 # ================================================================
 # 0. 主逻辑循环 (TUI 结构)
 # ================================================================
 while true; do
+    # 实时简易检测，用于主菜单展示
+    D_VER_SHORT="未安装"
+    if command -v docker &>/dev/null; then
+        D_VER_SHORT=$(docker -v | awk '{print $3}' | tr -d ',')
+    fi
+    C_VER_SHORT="未安装"
+    if command -v docker-compose &>/dev/null; then
+        C_VER_SHORT="已就绪"
+    elif docker compose version &>/dev/null; then
+        C_VER_SHORT="V2(Plugin)"
+    fi
+
     clear
-    echo -e "${GREEN}==============================================${NC}"
-    echo -e "${GREEN}       Docker \u0026 Compose 管理中心 (ck_sysinit)   ${NC}"
-    echo -e "${GREEN}==============================================${NC}"
-    echo " 1. 查看监控/状态与配置"
-    echo " 2. Docker 服务指令管理 (启动/停止/重启)"
-    echo " 3. 执行在线安装/更新任务"
-    echo " 4. 彻底卸载 Docker 套件"
+    echo -e "${GREEN}======================================================${NC}"
+    echo -e "${GREEN}       Docker \u0026 Compose 管理中心 (ck_sysinit)         ${NC}"
+    echo -e "${GREEN}======================================================${NC}"
+    echo -e " ⚓️ 引擎状态: ${YELLOW}$D_VER_SHORT${NC}  |  编排工具: ${YELLOW}$C_VER_SHORT${NC}"
+    echo -e "${GREEN}------------------------------------------------------${NC}"
+    echo " 1. 查看监控/详细配置 (daemon.json)"
+    echo " 2. Docker 服务指令管理 (启动/停止/重启/自启)"
+    echo " 3. 执行在线下载安装/覆盖更新"
+    echo " 4. 彻底卸载 Docker 及其组件"
     echo " 0. 退出管理窗口"
-    echo -e "${GREEN}==============================================${NC}"
-    read -p "请选择交互选项 [0-4]: " main_choice
+    echo -e "${GREEN}======================================================${NC}"
+    read -p "请选择交互选项 [0-4]: " main_choice < /dev/tty
 
     case "$main_choice" in
         1) check_docker_status ;;

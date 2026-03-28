@@ -77,7 +77,7 @@ _show_startup_banner() {
     echo -e " ${YELLOW}包管理:${NC} ${PKG_MGR}  ${YELLOW}发行族:${NC} ${DISTRO_FAMILY}"
     echo -e "${CYAN}======================================================${NC}"
     echo ""
-    read -p "按回车键进入管理菜单..."
+    read -p "按回车键进入管理菜单..." < /dev/tty
 }
 
 # 1. 查看系统信息函数
@@ -164,7 +164,7 @@ show_sys_info() {
     echo -e "${YELLOW}运行时间:${NC}  $UPTIME"
     echo -e "${BLUE}==============================================${NC}"
     echo ""
-    read -p "按回车键返回主菜单..."
+    read -p "按回车键返回主菜单..." < /dev/tty
 }
 
 # --- MODULE SETUP COMPLETE ---
@@ -187,7 +187,7 @@ while true; do
     echo " 7. 安装常用软件包 (针对最小化系统)"
     echo " 0. 退出脚本"
     echo -e "${GREEN}==============================================${NC}"
-    read -p "请输入选项 [0-7]: " choice
+    read -p "请输入选项 [0-7]: " choice < /dev/tty
 
     case $choice in
         1) show_sys_info ;;
