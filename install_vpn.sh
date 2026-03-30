@@ -277,8 +277,8 @@ install_singbox_plus() {
 
     chmod +x "$SBP_SCRIPT"
     echo -e "  ➜ 正在唤起 Sing-Box-Plus 内部管理矩阵..."
-    # 核心调用：直接进入 sing-box-plus 的交互菜单
-    bash "$SBP_SCRIPT"
+    # 核心调用：显式重定向 TTY 解决交互循环问题
+    bash "$SBP_SCRIPT" < /dev/tty
 }
 
 # ================================================================
@@ -306,8 +306,8 @@ vps_fusion_test() {
     chmod +x "$ECS_SCRIPT"
     echo -e "  ➜ 正在唤起 融合怪 (ecs.sh) 进行全向测评..."
     
-    # 本地化执行
-    bash "$ECS_SCRIPT"
+    # 核心调用：显式重定向 TTY 解决交互循环问题
+    bash "$ECS_SCRIPT" < /dev/tty
     
     read -p "测评流程已结束，按回车键返回..." < /dev/tty
 }
