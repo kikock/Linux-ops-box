@@ -32,6 +32,10 @@ else
     PKG_MGR="echo"
 fi
 
+# 统一模块存储目录
+CK_MODULE_DIR="/opt/ck_sysinit/modules"
+mkdir -p "$CK_MODULE_DIR"
+
 # 基础环境架构自摸
 ARCH=$(uname -m)
 XRAY_ARCH="64"
@@ -253,12 +257,14 @@ EOF
 # 3. 协议 C: Sing-Box-Plus (18节点/WARP解锁) 整合调用
 # ================================================================
 install_singbox_plus() {
-    local SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    local SBP_SCRIPT="${SCRIPT_DIR}/system/modules/sing-box-plus.sh"
+    local SBP_SCRIPT="${CK_MODULE_DIR}/sing-box-plus.sh"
 
     clear
     echo -e "${CYAN}================ 核心部署: Sing-Box-Plus (全能代理) ================${NC}"
     
+    # 确保目录存在
+    mkdir -p "$CK_MODULE_DIR"
+
     if [[ ! -f "$SBP_SCRIPT" ]]; then
         echo -e "${YELLOW}警告: 未在项目目录下检测到 sing-box-plus.sh，尝试一键拉取...${NC}"
         local MIRROR=$(_get_gh_mirror)
@@ -279,12 +285,14 @@ install_singbox_plus() {
 # 4. VPS 融合怪测评工具 (全项性能/流媒体测试)
 # ================================================================
 vps_fusion_test() {
-    local SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    local ECS_SCRIPT="${SCRIPT_DIR}/system/modules/ecs.sh"
+    local ECS_SCRIPT="${CK_MODULE_DIR}/ecs.sh"
 
     clear
     echo -e "${CYAN}================ 核心工具: VPS 融合怪 (本地引擎) ================${NC}"
     
+    # 确保目录存在
+    mkdir -p "$CK_MODULE_DIR"
+
     if [[ ! -f "$ECS_SCRIPT" ]]; then
         echo -e "${YELLOW}警告: 未在模块目录下检测到 ecs.sh，尝试重新拉取...${NC}"
         if ! curl -L -f -# -o "$ECS_SCRIPT" "https://gitlab.com/spiritysdx/za/-/raw/main/ecs.sh"; then
