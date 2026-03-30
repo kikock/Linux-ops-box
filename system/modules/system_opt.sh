@@ -66,7 +66,12 @@ manage_mirror_sources() {
     _detect_distro() {
         if [ -f /etc/os-release ]; then
             . /etc/os-release
-            echo "${ID}:${VERSION_CODENAME:-$UBUNTU_CODENAME}"
+            if [ -n "$VERSION_CODENAME" ]; then
+                echo "${ID}:${VERSION_CODENAME}"
+            else
+                # 针对 CentOS 等无 codename 的系统，使用主版本号
+                echo "${ID}:${VERSION_ID%%.*}"
+            fi
         else
             echo "unknown:"
         fi
@@ -78,53 +83,65 @@ manage_mirror_sources() {
         local distro_info
         distro_info=$(_detect_distro)
         local distro_id=${distro_info%%:*}
-        local codename=${distro_info##*:}
+        local version_info=${distro_info##*:}
 
-        if [ -z "$codename" ]; then
-            echo -e "${RED}错误: 无法自动判断发行版代名 (codename)，请手动配置。${NC}"
-            return 1
-        fi
+        echo -e "${YELLOW}检测到: $distro_id $version_info${NC}"
 
-        echo -e "${YELLOW}检测到: $distro_id $codename${NC}"
+        if [[ "$distro_id" == "ubuntu" || "$distro_id" == "debian" ]]; then
+            # 备份原配置
+            local bak="/etc/apt/sources.list.bak.$(date +%F_%H%M%S)"
+            cp /etc/apt/sources.list "$bak" 2>/dev/null && echo -e "${BLUE}已备份原配置到: $bak${NC}"
 
-        # 备份原配置
-        local bak="/etc/apt/sources.list.bak.$(date +%F_%H%M%S)"
-        cp /etc/apt/sources.list "$bak" 2>/dev/null && echo -e "${BLUE}已备份原配置到: $bak${NC}"
-
-        if [[ "$distro_id" == "ubuntu" ]]; then
-            cat > /etc/apt/sources.list <<EOF
-# Ubuntu $codename - $mirror (自动生成 $(date +"%Y-%m-%d %H:%M:%S"))
-deb $mirror $codename main restricted universe multiverse
-deb $mirror $codename-updates main restricted universe multiverse
-deb $mirror $codename-security main restricted universe multiverse
+            if [[ "$distro_id" == "ubuntu" ]]; then
+                cat > /etc/apt/sources.list <<EOF
+# Ubuntu $version_info - $mirror (自动生成 $(date +"%Y-%m-%d %H:%M:%S"))
+deb $mirror $version_info main restricted universe multiverse
+deb $mirror $version_info-updates main restricted universe multiverse
+deb $mirror $version_info-security main restricted universe multiverse
 EOF
-        elif [[ "$distro_id" == "debian" ]]; then
-            # Debian security 源：镜像站路径为 {站点}/debian-security
-            # 需从 mirror 中去掉 /debian 后缀后再拼接
-            # 例: http://mirrors.ustc.edu.cn/debian → http://mirrors.ustc.edu.cn/debian-security
-            # 例: http://deb.debian.org/debian → http://deb.debian.org/debian-security
-            local mirror_base="${mirror%/debian}"
-            local security_mirror="${mirror_base}/debian-security"
+            elif [[ "$distro_id" == "debian" ]]; then
+                local mirror_base="${mirror%/debian}"
+                local security_mirror="${mirror_base}/debian-security"
+                [[ "$mirror" == *"deb.debian.org"* ]] && security_mirror="http://security.debian.org/debian-security"
 
-            # 官方源 security 使用 security.debian.org 更可靠
-            if [[ "$mirror" == *"deb.debian.org"* ]]; then
-                security_mirror="http://security.debian.org/debian-security"
+                cat > /etc/apt/sources.list <<EOF
+# Debian $version_info - $mirror (自动生成 $(date +"%Y-%m-%d %H:%M:%S"))
+deb $mirror $version_info main contrib non-free
+deb $mirror $version_info-updates main contrib non-free
+deb $security_mirror $version_info-security main contrib non-free
+EOF
             fi
-
-            cat > /etc/apt/sources.list <<EOF
-# Debian $codename - $mirror (自动生成 $(date +"%Y-%m-%d %H:%M:%S"))
-deb $mirror $codename main contrib non-free
-deb $mirror $codename-updates main contrib non-free
-deb $security_mirror $codename-security main contrib non-free
-EOF
+        elif [[ "$distro_id" == "centos" ]]; then
+            echo -e "${YELLOW}[INFO] 正在备份 YUM 配置目录 (/etc/yum.repos.d/)...${NC}"
+            tar -czf "/etc/yum.repos.d.bak.$(date +%F).tar.gz" /etc/yum.repos.d/ &>/dev/null
+            
+            if [[ "$version_info" == "8" ]]; then
+                echo -e "${YELLOW}[INFO] 正在为 CentOS 8 (EOL) 配置官方归档源 (Vault)...${NC}"
+                sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* 2>/dev/null
+                sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* 2>/dev/null
+                # 如果用户选择了国内镜像地址
+                if [[ "$mirror" != *"vault.centos.org"* ]]; then
+                    sed -i "s|vault.centos.org|$mirror|g" /etc/yum.repos.d/CentOS-* 2>/dev/null
+                fi
+            else
+                echo -e "${YELLOW}[INFO] 正在为 CentOS $version_info 处理 Repo 替换...${NC}"
+                sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-Base.repo 2>/dev/null
+                sed -i "s|http://mirror.centos.org/centos|$mirror|g" /etc/yum.repos.d/CentOS-Base.repo 2>/dev/null
+            fi
         else
             echo -e "${RED}无法识别发行版: $distro_id，请手动配置。${NC}"
             return 1
         fi
 
-        echo -e "${GREEN}已写入新镜像源配置（backports 已排除，避免 404 错误）。${NC}"
-        echo -e "${YELLOW}正在执行 apt update 验证...${NC}"
-        apt update 2>&1 | tail -8
+        echo -e "${GREEN}镜像源配置处理完成。${NC}"
+        echo -e "${YELLOW}正在更新软件索引...${NC}"
+        if command -v apt &>/dev/null; then
+            apt update 2>&1 | tail -5
+        elif command -v dnf &>/dev/null; then
+            dnf makecache
+        elif command -v yum &>/dev/null; then
+            yum makecache
+        fi
         return $?
     }
 
@@ -137,8 +154,8 @@ EOF
         # 当前源预览
         distro_info=$(_detect_distro)
         distro_id=${distro_info%%:*}
-        codename=${distro_info##*:}
-        echo -e "  当前系统: ${YELLOW}$distro_id $codename${NC}"
+        version_info=${distro_info##*:}
+        echo -e "  当前系统: ${YELLOW}$distro_id $version_info${NC}"
         echo -e "  当前备份文件:"
         ls /etc/apt/sources.list.bak.* 2>/dev/null | tail -3 | while read -r f; do echo "    $f"; done || echo "    (无备份)"
         echo -e "${GREEN}==============================================${NC}"
@@ -153,46 +170,66 @@ EOF
             echo " 2. 清华大学 Debian 镜像源 (mirrors.tuna.tsinghua.edu.cn)"
             echo " 3. 中科大 Debian 镜像源 (mirrors.ustc.edu.cn)"
             echo " 4. Debian 官方源 (deb.debian.org)"
+        elif [[ "$distro_id" == "centos" ]]; then
+            if [[ "$version_info" == "8" ]]; then
+                echo " 1. 阿里云 CentOS 8 Vault 归档源 (mirrors.aliyun.com)"
+                echo " 2. 清华大学 CentOS 8 Vault 归档源 (mirrors.tuna.tsinghua.edu.cn)"
+                echo " 3. 中科大 CentOS 8 Vault 归档源 (mirrors.ustc.edu.cn)"
+                echo " 4. 官方 CentOS 8 Vault (vault.centos.org)"
+            else
+                echo " 1. 阿里云 CentOS $version_info 镜像源 (mirrors.aliyun.com)"
+                echo " 2. 清华大学 CentOS $version_info 镜像源 (mirrors.tuna.tsinghua.edu.cn)"
+                echo " 3. 中科大 CentOS $version_info 镜像源 (mirrors.ustc.edu.cn)"
+                echo " 4. 官方 CentOS $version_info 镜像源 (mirror.centos.org)"
+            fi
         else
             echo " 1-4. (抱歉，未能识别系统类型)"
         fi
-        echo " 5. 查看当前 sources.list 内容"
-        echo " 6. 还原备份的镜像源"
-        echo " 7. 仅禁用/移除 backports 源 (保留其他配置)"
+        echo " 5. 查看当前 sources.list 内容/Repo 列表"
+        echo " 6. 还原项目备份的镜像配置"
+        echo " 7. [Debian/Ubuntu] 仅禁用/移除 backports 源"
         echo " 0. 返回上层菜单"
         echo -e "${GREEN}==============================================${NC}"
         read -p "请选择操作 [0-7]: " mirror_choice
 
         case $mirror_choice in
             1)
-                if [[ "$distro_id" == "ubuntu" ]]; then
-                    _write_source "http://mirrors.aliyun.com/ubuntu"
-                else
-                    _write_source "http://mirrors.aliyun.com/debian"
+                if [[ "$distro_id" == "ubuntu" ]]; then _write_source "http://mirrors.aliyun.com/ubuntu"
+                elif [[ "$distro_id" == "debian" ]]; then _write_source "http://mirrors.aliyun.com/debian"
+                elif [[ "$distro_id" == "centos" ]]; then
+                    if [[ "$version_info" == "8" ]]; then _write_source "http://mirrors.aliyun.com/centos-vault"
+                    else _write_source "http://mirrors.aliyun.com/centos"
+                    fi
                 fi
                 read -p "按回车键继续..."
                 ;;
             2)
-                if [[ "$distro_id" == "ubuntu" ]]; then
-                    _write_source "http://mirrors.tuna.tsinghua.edu.cn/ubuntu"
-                else
-                    _write_source "http://mirrors.tuna.tsinghua.edu.cn/debian"
+                if [[ "$distro_id" == "ubuntu" ]]; then _write_source "http://mirrors.tuna.tsinghua.edu.cn/ubuntu"
+                elif [[ "$distro_id" == "debian" ]]; then _write_source "http://mirrors.tuna.tsinghua.edu.cn/debian"
+                elif [[ "$distro_id" == "centos" ]]; then
+                    if [[ "$version_info" == "8" ]]; then _write_source "http://mirrors.tuna.tsinghua.edu.cn/centos-vault"
+                    else _write_source "http://mirrors.tuna.tsinghua.edu.cn/centos"
+                    fi
                 fi
                 read -p "按回车键继续..."
                 ;;
             3)
-                if [[ "$distro_id" == "ubuntu" ]]; then
-                    _write_source "http://mirrors.ustc.edu.cn/ubuntu"
-                else
-                    _write_source "http://mirrors.ustc.edu.cn/debian"
+                if [[ "$distro_id" == "ubuntu" ]]; then _write_source "http://mirrors.ustc.edu.cn/ubuntu"
+                elif [[ "$distro_id" == "debian" ]]; then _write_source "http://mirrors.ustc.edu.cn/debian"
+                elif [[ "$distro_id" == "centos" ]]; then
+                    if [[ "$version_info" == "8" ]]; then _write_source "http://mirrors.ustc.edu.cn/centos-vault"
+                    else _write_source "http://mirrors.ustc.edu.cn/centos"
+                    fi
                 fi
                 read -p "按回车键继续..."
                 ;;
             4)
-                if [[ "$distro_id" == "ubuntu" ]]; then
-                    _write_source "http://archive.ubuntu.com/ubuntu"
-                else
-                    _write_source "http://deb.debian.org/debian"
+                if [[ "$distro_id" == "ubuntu" ]]; then _write_source "http://archive.ubuntu.com/ubuntu"
+                elif [[ "$distro_id" == "debian" ]]; then _write_source "http://deb.debian.org/debian"
+                elif [[ "$distro_id" == "centos" ]]; then
+                    if [[ "$version_info" == "8" ]]; then _write_source "http://vault.centos.org"
+                    else _write_source "http://mirror.centos.org/centos"
+                    fi
                 fi
                 read -p "按回车键继续..."
                 ;;
