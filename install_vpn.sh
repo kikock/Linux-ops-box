@@ -279,13 +279,27 @@ install_singbox_plus() {
 # 4. VPS 融合怪测评工具 (全项性能/流媒体测试)
 # ================================================================
 vps_fusion_test() {
+    local SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    local ECS_SCRIPT="${SCRIPT_DIR}/system/modules/ecs.sh"
+
     clear
-    echo -e "${CYAN}================ 核心工具: VPS 融合怪 (全向测评) ================${NC}"
-    echo -e "${YELLOW}提示: 该脚本将执行性能/带宽/流媒体等全量测试，耗时预计 5-10 分钟。${NC}"
-    echo -e "  ➜ 正在从 GitLab 获取最新引擎并注入环境..."
+    echo -e "${CYAN}================ 核心工具: VPS 融合怪 (本地引擎) ================${NC}"
     
-    # 官方推荐运行方式
-    bash <(curl -L -s https://gitlab.com/spiritysdx/za/-/raw/main/ecs.sh)
+    if [[ ! -f "$ECS_SCRIPT" ]]; then
+        echo -e "${YELLOW}警告: 未在模块目录下检测到 ecs.sh，尝试重新拉取...${NC}"
+        if ! curl -L -f -# -o "$ECS_SCRIPT" "https://gitlab.com/spiritysdx/za/-/raw/main/ecs.sh"; then
+            echo -e "${RED}致命错误: 无法获取测评引擎，请检查网络。${NC}"
+            read -p "按回车手动返回..." < /dev/tty
+            return 1
+        fi
+    fi
+
+    echo -e "${YELLOW}提示: 该脚本将执行性能/带宽/流媒体等全量测试，耗时预计 5-10 分钟。${NC}"
+    chmod +x "$ECS_SCRIPT"
+    echo -e "  ➜ 正在唤起 融合怪 (ecs.sh) 进行全向测评..."
+    
+    # 本地化执行
+    bash "$ECS_SCRIPT"
     
     read -p "测评流程已结束，按回车键返回..." < /dev/tty
 }
