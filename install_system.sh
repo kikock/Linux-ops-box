@@ -27,7 +27,7 @@ TARGET_OPT="/opt/ck_sysinit"
 TARGET_BIN="/usr/local/bin/ck_sysinit"
 REPO_URL="https://github.com/kikock/Linux-ops-box.git"
 # 定义默认拉取分支 (正式版建议设为 main)
-REPO_BRANCH="dev1.0"
+REPO_BRANCH="main"
 
 # 2. 核心源码定位：自动判定是本地执行还是云端 curl 管道执行
 HAS_LOCAL_FILES=false

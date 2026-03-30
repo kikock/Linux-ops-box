@@ -355,10 +355,10 @@ domain_route_analysis() {
     echo -e "${CYAN}======================================================${NC}"
 
     # 检查并安装必要工具
-    for cmd in traceroute mtr; do
+    for cmd in traceroute mtr bc; do
         if ! command -v $cmd &>/dev/null; then
             echo -e "${YELLOW}正在安装缺失工具: $cmd...${NC}"
-            ${PKG_MGR} install -y $cmd &>/dev/null
+            [ -n "$PKG_MGR" ] && ${PKG_MGR} install -y $cmd &>/dev/null
         fi
     done
 
@@ -376,28 +376,28 @@ domain_route_analysis() {
     IFS='|' read -r DNS_T TCP_T TTFB_T TOTAL_T <<< "$CURL_DATA"
 
     # 判定是否连接失败 (如果总时间 >= 10 且后续阶段为 0)
-    if (( $(echo "$TOTAL_T >= 10" | bc -l) )) && (( $(echo "$TCP_T == 0" | bc -l) )); then
+    if (( $(echo "$TOTAL_T >= 10" | bc -l 2>/dev/null || echo 0) )) && (( $(echo "$TCP_T == 0" | bc -l 2>/dev/null || echo 0) )); then
         echo -e "    状态反馈:   ${RED}⚠ 目标连接超时或 80 端口未开放${NC}"
     else
-        printf "    %-12s: %s s\n" "DNS 解析" "${CYAN}${DNS_T}${NC}"
-        printf "    %-12s: %s s\n" "TCP 握手" "${CYAN}${TCP_T}${NC}"
-        printf "    %-12s: %s s\n" "首字节响应" "${CYAN}${TTFB_T}${NC}"
-        printf "    %-12s: %s s\n" "总计耗时" "${GREEN}${TOTAL_T}${NC}"
+        printf "    %-12s: ${CYAN}%s${NC} s\n" "DNS 解析" "${DNS_T}"
+        printf "    %-12s: ${CYAN}%s${NC} s\n" "TCP 握手" "${TCP_T}"
+        printf "    %-12s: ${CYAN}%s${NC} s\n" "首字节响应" "${TTFB_T}"
+        printf "    %-12s: ${GREEN}%s${NC} s\n" "总计耗时" "${TOTAL_T}"
     fi
 
     # --- 第二部分：路由图 (Traceroute) ---
     echo -e "\n${YELLOW}[2] 路由追踪路径图 (Traceroute):${NC}"
     printf "  ${BLUE}%-4s  %-20s    %-15s${NC}\n" "跳数" "节点 IP" "节点延迟 (RTT)"
     echo -e "  ------------------------------------------------------"
-    traceroute -q 1 -w 1 -n "$DOMAIN" 2>/dev/null | awk '
+    traceroute -q 1 -w 1 -n "$DOMAIN" 2>/dev/null | awk -v g="${GREEN}" -v y="${YELLOW}" -v r="${RED}" -v n="${NC}" '
         NR>1 {
             if ($2 == "*") {
                 printf "  %-4s  %-20s    %s\n", $1, "* * *", "请求超时"
             } else {
-                color="'${GREEN}'"; 
-                if ($3 > 80) color="'${YELLOW}'";
-                if ($3 > 160) color="'${RED}'";
-                printf "  %-4s  %-20s    %b%s ms%b\n", $1, $2, color, $3, "'${NC}'"
+                color=g; 
+                if ($3 > 80) color=y;
+                if ($3 > 160) color=r;
+                printf "  %-4s  %-20s    %s%s ms%s\n", $1, $2, color, $3, n
             }
         }
     '
@@ -406,9 +406,9 @@ domain_route_analysis() {
     # --- 第三部分：动态链路稳定性测试 (MTR) ---
     echo -e "\n${YELLOW}[3] 稳定性深度扫描 (MTR 10轮):${NC}"
     printf "  ${BLUE}%-40s  %-10s  %-8s${NC}\n" "中继节点 (Gateway)" "丢包 (Loss)" "均值 (Avg)"
-    mtr -rw -c 10 "$DOMAIN" | tail -n +2 | awk '{
-        loss_color="'${GREEN}'"; if($3 > 5) loss_color="'${YELLOW}'"; if($3 > 20) loss_color="'${RED}'";
-        printf "  %-40s  %b%-6s%b  %-8s ms\n", $2, loss_color, $3"%", "'${NC}'", $6
+    mtr -rw -c 10 "$DOMAIN" 2>/dev/null | tail -n +2 | awk -v g="${GREEN}" -v y="${YELLOW}" -v r="${RED}" -v n="${NC}" '{
+        loss_color=g; if($3 > 5) loss_color=y; if($3 > 20) loss_color=r;
+        printf "  %-40s  %s%-6s%s  %-8s ms\n", $2, loss_color, $3"%", n, $6
     }'
 
     echo -e "\n${CYAN}======================================================${NC}"
