@@ -250,7 +250,33 @@ EOF
 }
 
 # ================================================================
-# 3. 游戏联机环境与网速诊断工具
+# 3. 协议 C: Sing-Box-Plus (18节点/WARP解锁) 整合调用
+# ================================================================
+install_singbox_plus() {
+    local SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    local SBP_SCRIPT="${SCRIPT_DIR}/sing-box-plus.sh"
+
+    clear
+    echo -e "${CYAN}================ 核心部署: Sing-Box-Plus (全能代理) ================${NC}"
+    
+    if [[ ! -f "$SBP_SCRIPT" ]]; then
+        echo -e "${YELLOW}警告: 未在项目目录下检测到 sing-box-plus.sh，尝试一键拉取...${NC}"
+        local MIRROR=$(_get_gh_mirror)
+        if ! curl -L -f -# -o "$SBP_SCRIPT" "https://raw.githubusercontent.com/Alvin9999-newpac/Sing-Box-Plus/main/sing-box-plus.sh"; then
+            echo -e "${RED}致命错误: Sing-Box-Plus 脚本下载失败，请检查网络联通性。${NC}"
+            read -p "按回车手动返回..." < /dev/tty
+            return 1
+        fi
+    fi
+
+    chmod +x "$SBP_SCRIPT"
+    echo -e "  ➜ 正在唤起 Sing-Box-Plus 内部管理矩阵..."
+    # 核心调用：直接进入 sing-box-plus 的交互菜单
+    bash "$SBP_SCRIPT"
+}
+
+# ================================================================
+# 4. 游戏联机环境与网速诊断工具
 # ================================================================
 network_diagnosis() {
     clear
@@ -424,10 +450,13 @@ while true; do
     echo -e "${GREEN}       VPS-VPN 专家工具箱 (Linux-ops-box)             ${NC}"
     echo -e "${GREEN}======================================================${NC}"
     # 基础状态概览
-    local WG_S="停止"
+    local WG_S="${RED}停止${NC}"
     systemctl is-active wg-quick@wg0 &>/dev/null && WG_S="${GREEN}运行中${NC}"
     
-    echo -e " 🛡  WireGuard 状态: $WG_S"
+    local SB_S="${RED}停止${NC}"
+    systemctl is-active sing-box &>/dev/null && SB_S="${GREEN}运行中${NC}"
+
+    echo -e " 🛡  WireGuard 状态: $WG_S | Sing-Box 状态: $SB_S"
     echo -e "${GREEN}------------------------------------------------------${NC}"
     echo " 1. 部署/更新 WireGuard (极速 VPN)"
     echo " 2. 部署/更新 Xray-Reality (流量隐形代理)"
@@ -435,6 +464,7 @@ while true; do
     echo " 4. 彻底卸载所有 VPN/代理组件"
     echo " 5. 运行游戏联机与网速诊断"
     echo " 6. 域名测速与路由链路分析"
+    echo " 7. 部署 Sing-Box-Plus (18节点/WARP解锁) [推荐]"
     echo " 0. 退出工具箱"
     echo -e "${GREEN}======================================================${NC}"
     read -p "请选择交互选项 [0-6]: " main_choice < /dev/tty
@@ -459,12 +489,21 @@ while true; do
                 rm -rf /etc/xray /usr/local/bin/xray
                 
                 systemctl daemon-reload
-                echo -e "${GREEN} 所有 VPN 组件已从系统总线移除。${NC}"
+                
+                echo -e "${YELLOW} [3/3] 正在清理 Sing-Box-Plus 部署遗迹...${NC}"
+                systemctl stop sing-box &>/dev/null
+                systemctl disable sing-box &>/dev/null
+                rm -f /etc/systemd/system/sing-box.service
+                rm -rf /opt/sing-box /var/lib/sing-box-plus /usr/local/bin/sing-box
+                
+                systemctl daemon-reload
+                echo -e "${GREEN} 所有 VPN/Proxy 组件已从系统总线彻底移除。${NC}"
             fi
             read -p "按回车键返回..." < /dev/tty
             ;;
         5) network_diagnosis ;;
         6) domain_route_analysis ;;
+        7) install_singbox_plus ;;
         0) exit 0 ;;
         *) echo -e "${RED} 无效参数${NC}"; sleep 1 ;;
     esac
