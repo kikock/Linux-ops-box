@@ -254,7 +254,7 @@ EOF
 # ================================================================
 install_singbox_plus() {
     local SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    local SBP_SCRIPT="${SCRIPT_DIR}/sing-box-plus.sh"
+    local SBP_SCRIPT="${SCRIPT_DIR}/system/modules/sing-box-plus.sh"
 
     clear
     echo -e "${CYAN}================ 核心部署: Sing-Box-Plus (全能代理) ================${NC}"
@@ -276,7 +276,22 @@ install_singbox_plus() {
 }
 
 # ================================================================
-# 4. 游戏联机环境与网速诊断工具
+# 4. VPS 融合怪测评工具 (全项性能/流媒体测试)
+# ================================================================
+vps_fusion_test() {
+    clear
+    echo -e "${CYAN}================ 核心工具: VPS 融合怪 (全向测评) ================${NC}"
+    echo -e "${YELLOW}提示: 该脚本将执行性能/带宽/流媒体等全量测试，耗时预计 5-10 分钟。${NC}"
+    echo -e "  ➜ 正在从 GitLab 获取最新引擎并注入环境..."
+    
+    # 官方推荐运行方式
+    bash <(curl -L -s https://gitlab.com/spiritysdx/za/-/raw/main/ecs.sh)
+    
+    read -p "测评流程已结束，按回车键返回..." < /dev/tty
+}
+
+# ================================================================
+# 5. 游戏联机环境与网速诊断工具
 # ================================================================
 network_diagnosis() {
     clear
@@ -465,6 +480,7 @@ while true; do
     echo " 5. 运行游戏联机与网速诊断"
     echo " 6. 域名测速与路由链路分析"
     echo " 7. 部署 Sing-Box-Plus (18节点/WARP解锁) [推荐]"
+    echo " 8. 运行 VPS 融合怪 (性能/带宽/流媒体全项测试)"
     echo " 0. 退出工具箱"
     echo -e "${GREEN}======================================================${NC}"
     read -p "请选择交互选项 [0-6]: " main_choice < /dev/tty
@@ -504,6 +520,7 @@ while true; do
         5) network_diagnosis ;;
         6) domain_route_analysis ;;
         7) install_singbox_plus ;;
+        8) vps_fusion_test ;;
         0) exit 0 ;;
         *) echo -e "${RED} 无效参数${NC}"; sleep 1 ;;
     esac
