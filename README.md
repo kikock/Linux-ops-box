@@ -70,6 +70,26 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 2. **SSL 自动签证**: 自动申请 Let's Encrypt 证书，并配置强化的伪装站点。
 3. **极致性能**: 自动注入 BBR 加速参数，适配最前沿的 Caddy forwardproxy 插件。
 
+## 📦 5. 离线安装方案 (无网络环境)
+
+针对物理隔离、内网环境或 Github 连接极其不稳定的场景，本工具箱支持 **“有网下载、离线部署”** 的自适应本地安装逻辑。
+
+### Step 1: 准备安装包 (有网机器)
+在一台可以访问外网的机器上下载完整源码包，并传输至目标服务器：
+- **方案 A (Git)**: `git clone https://github.com/kikock/Linux-ops-box.git`
+- **方案 B (ZIP)**: 通过浏览器访问 [Github 仓库](https://github.com/kikock/Linux-ops-box) 下载 `Source Code (zip)`。
+
+### Step 2: 文件夹传输 (离线服务器)
+使用 `scp`、`sftp` 或 U 盘等手段，将解压后的 `Linux-ops-box` 文件夹整体上传到服务器某目录下。
+
+### Step 3: 执行本地部署
+进入该文件夹，直接以 `root` 权限运行安装脚本：
+```bash
+cd Linux-ops-box
+sudo bash install_system.sh
+```
+> **逻辑说明**: 安装程序检测到当前目录存在 `system/` 子目录后，会自动跳过 Github 云端检索，实现秒级的本地软链接及守护库构建工作。
+
 ---
 
 ## 🛠 开发扩展说明
