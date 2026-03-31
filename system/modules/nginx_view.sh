@@ -85,20 +85,93 @@ nginx_config_view() {
     read -p "按回车键返回..."
 }
 
-# Nginx 管理二级菜单
+# Nginx 站点与运行应用监控中心
+_display_process_table() {
+    local filter=$1
+    local title="系统实时资源占用 (Top 15)"
+    [[ -n "$filter" ]] && title="Web 应用专项监控 ($filter)"
+    
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e " ${GREEN}●${NC} ${YELLOW}${title}${NC}"
+    printf "${BLUE}%-20s | %-7s | %-7s | %-10s | %-8s${NC}\n" "应用名称" "PID" "CPU%" "内存(RSS)" "状态"
+    printf "${BLUE}%-20s | %-7s | %-7s | %-10s | %-8s${NC}\n" "--------------------" "-------" "-------" "----------" "--------"
+
+    # 采集 ps 数据并处理
+    # 过滤掉 ps, grep, awk 本身及脚本进程
+    local filter_cmd="grep -vE 'ps|grep|awk|system_init|nginx_view'"
+    [[ -n "$filter" ]] && filter_cmd="grep -iE '$filter'"
+
+    ps -eo comm,pid,pcpu,rss,stat --sort=-pcpu | sed 1d | eval "$filter_cmd" | head -n 15 | while read -r comm pid pcpu rss stat; do
+        # 内存转换 (RSS 是 KB)
+        local mem_str
+        if [ "$rss" -gt 1048576 ]; then
+            mem_str=$(echo "scale=1; $rss/1024/1024" | bc)G
+        elif [ "$rss" -gt 1024 ]; then
+            mem_str=$(echo "scale=1; $rss/1024" | bc)M
+        else
+            mem_str="${rss}K"
+        fi
+        
+        # 截断超长进程名
+        [[ ${#comm} -gt 20 ]] && comm="${comm:0:17}..."
+        
+        printf "%-20s | %-7s | %-7s | %-10s | %-8s\n" "$comm" "$pid" "$pcpu%" "$mem_str" "$stat"
+    done
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+_app_monitor_view() {
+    local web_keywords="nginx|php|java|mysql|redis|node|httpd|python|tomcat|go"
+    local mode="all"
+    while true; do
+        clear
+        echo -e "${GREEN}======================================================${NC}"
+        echo -e "${GREEN}          服务/应用实时资源监控中心 (TUI)             ${NC}"
+        echo -e "${GREEN}======================================================${NC}"
+        
+        if [ "$mode" == "web" ]; then
+            _display_process_table "$web_keywords"
+            echo -e "\n [C] 切换全量视图 | [R] 手动刷新 | [Q] 返回二级菜单"
+        else
+            _display_process_table ""
+            echo -e "\n [W] 切换Web专项 | [R] 手动刷新 | [Q] 返回二级菜单"
+        fi
+
+        read -t 5 -n 1 -s -p "已开启自动刷新 (5s)... " key
+        case "$key" in
+            [Ww]) mode="web" ;;
+            [Cc]) mode="all" ;;
+            [Rr]) continue ;;
+            [Qq]) return ;;
+        esac
+    done
+}
+
+# Nginx 菜单重构
 nginx_menu() {
     while true; do
         clear
         echo -e "${GREEN}==============================================${NC}"
-        echo -e "${GREEN}          Nginx 配置管理 (二级菜单)           ${NC}"
+        echo -e "${GREEN}      服务 / 站点实时监控中心 (二级菜单)      ${NC}"
         echo -e "${GREEN}==============================================${NC}"
-        echo " 1. 查看 Nginx 配置列表 (自动扫描)"
+        echo " 1. 查看 Nginx 配置列表与站点映射"
+        echo " 2. 查看系统应用资源占用 (Top 15)"
+        echo " 3. 筛选 Web 相关服务状态 (Nginx/Java/PHP...)"
         echo " 0. 返回主菜单"
         echo -e "${GREEN}==============================================${NC}"
-        read -p "请选择操作 [0-1]: " nginx_choice
+        read -p "请选择操作 [0-3]: " nginx_choice
 
         case $nginx_choice in
             1) nginx_config_view ;;
+            2) _app_monitor_view ;;
+            3) 
+                # 直接进入 Web 模式
+                local web_keywords="nginx|php|java|mysql|redis|node|httpd|python|tomcat|go"
+                clear
+                _display_process_table "$web_keywords"
+                read -p "按回车键继续..."
+                _app_monitor_view 
+                ;;
             0) break ;;
             *) echo -e "${RED}无效输入。${NC}"; sleep 1 ;;
         esac

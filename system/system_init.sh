@@ -127,7 +127,7 @@ while true; do
     echo " 2. 系统软件包更新 (清理冗余/内核升级)"
     echo " 3. 系统环境优化 (源/BBR/Swap/时区)"
     echo " 4. 网络 IP 管理 (静态IP/网卡诊断)"
-    echo " 5. Nginx 站点配置透视"
+    echo " 5. 服务/站点实时监控中心"
     echo " 6. 常用专家工具集安装 (最小化系统必备)"
     echo " 7. 防火墙安全管理中心 (UFW/FirewallD)"
     echo -e "${RED} 9. 彻底卸载此工具箱 (清理自启动与链接)${NC}"
