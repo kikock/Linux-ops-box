@@ -92,11 +92,40 @@ sudo bash install_system.sh
 
 ---
 
-## 🛠 开发扩展说明
+## 🛠 开发扩展说明 (Developer Guide)
 
-1. 在 `system/modules/` 下建立新的处理逻辑 (`xxx.sh`)。
-2. 内部所有的控制台输出请统一弃用 `echo`，改为调用 `_log_info`、`_log_warn` 以及 `_log_err`。
-3. 在 `system/system_init.sh` 中增加一个模块引用语句及菜单分发即可！
+本工具箱采用高度模块化的 Shell 函数架构，极易进行二次开发。
+
+### 1. 新建模块范式
+在 `system/modules/` 下建立 `.sh` 文件，并遵循以下规范：
+- **全局环境**: 直接使用 `common.sh` 中导出的全局变量 (如 `$GREEN`, `$CYAN`, `$OS_NAME`, `$PKG_MGR`)。
+- **函数包裹**: 所有逻辑必须封装在函数内，避免在 `source` 时产生副作用。
+- **日志双写**: 强制使用 `_log_info` 等标准日志接口，严禁直接使用 `echo` 以确保审计。
+- **范态参考**: 建议参考 `modules/nginx_view.sh` 的 TUI 实现逻辑。
+
+### 2. 菜单挂载流程
+1. 编辑 `system/system_init.sh`。
+2. 在文件头部执行 `source "$BASE_DIR/modules/your_module.sh"`。
+3. 在 `while true` 循环中增加菜单项编号。
+4. 在 `case` 语句块中分发执行对应的模块函数。
+
+---
+
+## 🚀 后续更新计划 (Roadmap)
+
+我们致力于将 `Linux-ops-box` 打造为最懂运维、最轻量的 TUI 工具箱。
+
+### 📅 近期目标 (v2.x)
+- [ ] **运维告警集成**: 支持 Telegram / 钉钉 / 飞书 机器人推送系统关键指标异常告警。
+- [ ] **数据库管理中心**: 提供 MySQL、PostgreSQL、Redis 的 TUI 仪表盘与配置优化工具。
+- [ ] **SSL 证书管家**: 集成 `acme.sh` 的全量生命周期管理，支持自动化 DNS-01 验证。
+
+### 🌠 长期规划 (v3.0+)
+- [ ] **插件市场化**: 实现 `ck_sysinit install <plugin_name>` 动态插件分发与版本控制。
+- [ ] **极致安全扫描**: 引入二进制级的 Rootkit 检测、容器安全逃逸审计以及防火墙动态黑名单。
+- [ ] **多端控制**: 探索基于 Go 语言重构的、内置 Web 仪表盘的分布式运维底座。
+
+---
 
 ## 📄 LICENSE
 MIT License.
