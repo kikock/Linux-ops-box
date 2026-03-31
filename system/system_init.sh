@@ -130,9 +130,10 @@ while true; do
     echo " 5. Nginx 站点配置透视"
     echo " 6. 常用专家工具集安装 (最小化系统必备)"
     echo " 7. 防火墙安全管理中心 (UFW/FirewallD)"
+    echo -e "${RED} 9. 彻底卸载此工具箱 (清理自启动与链接)${NC}"
     echo " 0. 退出工具箱"
     echo -e "${GREEN}==================================================${NC}"
-    read -p "请输入指令编号 [0-7]: " choice < /dev/tty
+    read -p "请输入指令编号 [0-9]: " choice < /dev/tty
 
     case $choice in
         1) ssh_menu ;;
@@ -142,6 +143,21 @@ while true; do
         5) nginx_menu ;;
         6) install_common_tools ;;
         7) firewall_menu ;;
+        9) 
+            echo -e "${YELLOW}警告: 即将执行彻底卸载程序...${NC}"
+            read -p "是否确认从系统中移除 Linux-ops-box? [y/N]: " confirm
+            if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                # 清理软链接
+                rm -f "/usr/local/bin/ck_sysinit" 2>/dev/null
+                rm -f "/usr/local/bin/sysinit" 2>/dev/null
+                # 提示用户手动删除目录 (因为脚本正在从该目录运行，无法自删)
+                echo -e "${GREEN}✅ 全局调令符已清理。${NC}"
+                echo -e "${YELLOW}由于脚本正在运行，请在退出后手动执行以下指令完成最后清理：${NC}"
+                echo -e "  ${CYAN}rm -rf /opt/ck_sysinit${NC}"
+                echo -e "${BLUE}感谢使用！${NC}"
+                exit 0
+            fi
+            ;;
         0) echo -e "${BLUE}感谢使用，再见！- kikock${NC}"; exit 0 ;;
         *) echo -e "${RED}输入无效，请重新选择。${NC}" ; sleep 1 ;;
     esac

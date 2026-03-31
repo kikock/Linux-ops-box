@@ -29,7 +29,30 @@ REPO_URL="https://github.com/kikock/Linux-ops-box.git"
 # 定义默认拉取分支 (正式版建议设为 main)
 REPO_BRANCH="main"
 
-# 2. 核心源码定位：自动判定是本地执行还是云端 curl 管道执行
+# 2. 卸载逻辑触发
+if [[ "$1" == "--uninstall" ]] || [[ "$1" == "-u" ]]; then
+    echo -e "${YELLOW}==============================================${NC}"
+    echo -e "${YELLOW}  正在启动 Linux-ops-box 卸载程序...          ${NC}"
+    echo -e "${YELLOW}==============================================${NC}"
+    read -p "  危险操作：是否确认彻底移除所有运维工具组件? [y/N]: " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        echo -e "  ⏳ 正在清理全局调令符: ${TARGET_BIN} ..."
+        [ -f "$TARGET_BIN" ] || [ -L "$TARGET_BIN" ] && rm -f "$TARGET_BIN"
+        [ -L "/usr/local/bin/sysinit" ] && rm -f "/usr/local/bin/sysinit"
+        
+        echo -e "  ⏳ 正在移除系统守护库: ${TARGET_OPT} ..."
+        [ -d "$TARGET_OPT" ] && rm -rf "$TARGET_OPT"
+        
+        echo -e "\n${GREEN}🎉 卸载成功！「自动化系统运维工具箱」已从您的系统中彻底移除。${NC}"
+        echo -e "${BLUE}==============================================${NC}"
+        exit 0
+    else
+        echo -e "${CYAN}已取消卸载操作。${NC}"
+        exit 0
+    fi
+fi
+
+# 3. 核心源码定位：自动判定是本地执行还是云端 curl 管道执行
 HAS_LOCAL_FILES=false
 if [ -d "$PWD/system" ] && [ -f "$PWD/system/system_init.sh" ]; then
     HAS_LOCAL_FILES=true
@@ -70,28 +93,30 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
     # 优先尝试 curl 配合 tar (最常见组合)
     if command -v curl &>/dev/null && command -v tar &>/dev/null; then
         echo -e "  ➜ 引擎: curl + tar \n  ⏳ 正在下载系统镜像压缩包，请耐心等待进度条走完..."
-        rm -rf "/tmp/Linux-ops-box-${REPO_BRANCH}" /tmp/ops-box.tar.gz
+        rm -rf /tmp/ops-box-tar-dir /tmp/ops-box.tar.gz
+        mkdir -p /tmp/ops-box-tar-dir
         curl -L -# -o /tmp/ops-box.tar.gz "$TAR_URL"
         
         echo -e "  ⏳ 正在解压系统内核引擎..."
-        mkdir -p "/tmp/Linux-ops-box-${REPO_BRANCH}"
-        tar -xzf /tmp/ops-box.tar.gz -C /tmp
-        SRC_DIR="/tmp/Linux-ops-box-${REPO_BRANCH}/system"
+        tar -xzf /tmp/ops-box.tar.gz -C /tmp/ops-box-tar-dir
+        # 动态定位 system 目录，不再硬编码分支名后缀
+        SRC_DIR=$(find /tmp/ops-box-tar-dir -maxdepth 3 -name "system" -type d | head -n 1)
         
     elif command -v wget &>/dev/null && command -v unzip &>/dev/null; then
         echo -e "  ➜ 引擎: wget + unzip \n  ⏳ 正在下载系统镜像压缩包，若卡住请耐心等待..."
-        rm -rf /tmp/Linux-ops-box-main /tmp/ops-box.zip
+        rm -rf /tmp/ops-box-zip-dir /tmp/ops-box.zip
+        mkdir -p /tmp/ops-box-zip-dir
         wget -O /tmp/ops-box.zip --show-progress "$ZIP_URL"
         
         echo -e "  ⏳ 正在解压系统内核引擎..."
-        unzip -q /tmp/ops-box.zip -d /tmp/
-        SRC_DIR="/tmp/Linux-ops-box-main/system"
+        unzip -q /tmp/ops-box.zip -d /tmp/ops-box-zip-dir
+        SRC_DIR=$(find /tmp/ops-box-zip-dir -maxdepth 3 -name "system" -type d | head -n 1)
         
     elif command -v git &>/dev/null; then
         echo -e "  ➜ 引擎: git clone \n  ⏳ 正在拉取源码库仓库 [分支: ${REPO_BRANCH}]..."
-        rm -rf /tmp/Linux-ops-box
-        git clone --progress -b "${REPO_BRANCH}" "$GIT_REPO_URL" /tmp/Linux-ops-box
-        SRC_DIR="/tmp/Linux-ops-box/system"
+        rm -rf /tmp/Linux-ops-box-git
+        git clone --progress -b "${REPO_BRANCH}" "$GIT_REPO_URL" /tmp/Linux-ops-box-git
+        SRC_DIR="/tmp/Linux-ops-box-git/system"
         
     else
         echo -e "${RED}致命错误: 您的系统环境既没有 git，也没有 curl/tar 或 wget/unzip 组合，无法实现在线下载！${NC}"
@@ -99,48 +124,59 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
         exit 1
     fi
     
-    if [ ! -d "$SRC_DIR" ] || [ ! -f "$SRC_DIR/system_init.sh" ]; then
-        echo -e "${RED}致命错误: 从 Github 源码下载失败，网络离线或仓库尚未公开！${NC}"
+    if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ] || [ ! -f "$SRC_DIR/system_init.sh" ]; then
+        echo -e "${RED}致命错误: 从 Github 源码下载失败或解压路径匹配错误！${NC}"
+        echo -e "调试信息: 搜索到的源码路径为 [$SRC_DIR]${NC}"
         exit 1
     fi
 fi
 
 # 3. 开始最终部署
 echo -e "\n[1/3] 正在构建系统级守护库: ${TARGET_OPT} ..."
+# 清理可能存在的旧目录，确保全新同步
+[ -d "$TARGET_OPT" ] && rm -rf "$TARGET_OPT"
 mkdir -p "$TARGET_OPT"
 
 echo -e "[2/3] 正在同步核心微服务文件与外挂模块引擎 ..."
-# 覆盖同步所有主脚本及模块体系
-cp -a "$SRC_DIR/system_init.sh" "$TARGET_OPT/"
+# 同步主程序及模块体系
+cp -rf "$SRC_DIR/system_init.sh" "$TARGET_OPT/"
 if [ -d "$SRC_DIR/modules" ]; then
-    cp -r -a "$SRC_DIR/modules" "$TARGET_OPT/"
+    cp -rf "$SRC_DIR/modules" "$TARGET_OPT/"
 fi
-# 同步离线安装包或额外资源文件夹 (如 docker) 如果存在的话
+# 同步离线安装包或额外资源文件夹 (如 docker, nginx 等)
 for extra_dir in docker nginx static config; do
     if [ -d "$SRC_DIR/$extra_dir" ]; then
-        cp -r -a "$SRC_DIR/$extra_dir" "$TARGET_OPT/"
+        cp -rf "$SRC_DIR/$extra_dir" "$TARGET_OPT/"
     fi
 done
 
-# 赋予执行权限
-chmod +x "$TARGET_OPT/system_init.sh"
-for sh_file in "$TARGET_OPT"/modules/*.sh; do
-    [ -f "$sh_file" ] && chmod +x "$sh_file"
-done
+# 权限标准化清洗 (针对 Anolis OS/CentOS 8 严格模式)
+echo -e "  ⏳ 正在标准化全局权限协议 [755]..."
+chmod -R 755 "$TARGET_OPT"
+find "$TARGET_OPT" -type f -name "*.sh" -exec chmod +x {} \;
 
-echo -e "[3/3] 正在向上编译链接统全局调令符 ..."
-# 清理旧版本指令残留 (如果有的话)
+echo -e "[3/3] 正在向上编译链接系统全局调令符 ..."
+# 移除过时链接并建立标准的软链接
 [ -L "/usr/local/bin/sysinit" ] && rm -f "/usr/local/bin/sysinit"
+rm -f "$TARGET_BIN"
 ln -sf "$TARGET_OPT/system_init.sh" "$TARGET_BIN"
+chmod +x "$TARGET_BIN"
 
 # 清理临时下载痕迹 (如果是云端拉取)
 if [ "$HAS_LOCAL_FILES" = false ]; then
-    rm -rf "/tmp/Linux-ops-box-${REPO_BRANCH}" /tmp/ops-box.zip /tmp/Linux-ops-box /tmp/ops-box.tar.gz
+    rm -rf /tmp/ops-box-tar-dir /tmp/ops-box-zip-dir /tmp/Linux-ops-box-git /tmp/ops-box.tar.gz /tmp/ops-box.zip
 fi
 
 echo -e "\n${GREEN}==============================================${NC}"
 echo -e "${GREEN}🎉 恭喜！「自动化系统运维工具箱」全模块安装穿透成功！${NC}"
 echo -e "您现在可以在当前操作系统的 ${YELLOW}任意目录、任意位置${NC} 敲击以下指令快速呼出 TUI 控制台：\n"
 echo -e "  🔥  ${CYAN}ck_sysinit${NC}"
+
+# PATH 连通性辅助检测
+if ! command -v ck_sysinit &>/dev/null; then
+    echo -e "\n${YELLOW}提示: 检测到 /usr/local/bin 未在您的当前 PATH 中，请执行以下命令刷新环境：${NC}"
+    echo -e "  ${CYAN}export PATH=\$PATH:/usr/local/bin && source /etc/profile${NC}"
+fi
+
 echo -e "\n${BLUE}==============================================${NC}"
 exit 0
