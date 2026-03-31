@@ -147,19 +147,100 @@ _app_monitor_view() {
     done
 }
 
+_display_disk_io() {
+    echo -e " ${GREEN}●${NC} ${YELLOW}磁盘实时 I/O 速率 (采样周期: 1s)${NC}"
+    printf "${BLUE}%-15s | %-15s | %-15s${NC}\n" "磁盘设备" "读取 (KB/s)" "写入 (KB/s)"
+    printf "${BLUE}%-15s | %-15s | %-15s${NC}\n" "---------------" "---------------" "---------------"
+
+    # 获取初始采样数据 (字段3:设备名, 字段6:读取扇区, 字段10:写入扇区)
+    local stats1=$(cat /proc/diskstats | awk '$3 !~ /^[0-9]+$/ && $3 !~ /^loop/ && $3 !~ /^ram/ {print $3, $6, $10}')
+    sleep 1
+    local stats2=$(cat /proc/diskstats | awk '$3 !~ /^[0-9]+$/ && $3 !~ /^loop/ && $3 !~ /^ram/ {print $3, $6, $10}')
+    
+    # 解析并计算差异
+    echo "$stats1" | while read dev s1_read s1_write; do
+        local s2_data=$(echo "$stats2" | grep -w "^$dev")
+        if [ -n "$s2_data" ]; then
+            local s2_read=$(echo "$s2_data" | awk '{print $2}')
+            local s2_write=$(echo "$s2_data" | awk '{print $3}')
+            
+            # 计算每秒 KB (扇区大小通常为 512B)
+            local read_kb=$(( (s2_read - s1_read) * 512 / 1024 ))
+            local write_kb=$(( (s2_write - s1_write) * 512 / 1024 ))
+            
+            # 仅显示有活动速率的设备
+            if [ "$read_kb" -gt 0 ] || [ "$write_kb" -gt 0 ]; then
+                printf "%-15s | %-15s | %-15s\n" "$dev" "${read_kb} KB/s" "${write_kb} KB/s"
+            fi
+        fi
+    done
+}
+
+_display_disk_usage() {
+    echo -e " ${GREEN}●${NC} ${YELLOW}磁盘分区与挂载点状态 (df -Th)${NC}"
+    printf "${BLUE}%-20s | %-8s | %-7s | %-7s | %-5s | %-15s${NC}\n" "文件系统" "类型" "容量" "已用" "使用%" "挂载点"
+    printf "${BLUE}%-20s | %-8s | %-7s | %-7s | %-5s | %-15s${NC}\n" "--------------------" "--------" "-------" "-------" "-----" "---------------"
+    df -Th | grep -vE "tmpfs|devtmpfs|overlay|shm" | sed 1d | sort -hr -k 5 | while read -r fs type size used avail pct mount; do
+        [[ ${#fs} -gt 20 ]] && fs="...${fs: -17}"
+        printf "%-20s | %-8s | %-7s | %-7s | %-5s | %-15s\n" "$fs" "$type" "$size" "$used" "$pct" "$mount"
+    done
+    
+    if command -v lsblk &>/dev/null; then
+        echo -e "\n ${GREEN}●${NC} ${YELLOW}物理硬盘拓扑 (lsblk)${NC}"
+        lsblk -p -o NAME,FSTYPE,SIZE,MOUNTPOINT | grep -v "loop"
+    fi
+}
+
+_resource_monitoring_view() {
+    while true; do
+        clear
+        echo -e "${GREEN}======================================================${NC}"
+        echo -e "${GREEN}          系统资源实时监控中心 (TUI)                  ${NC}"
+        echo -e "${GREEN}======================================================${NC}"
+        
+        # 1. 内存概览
+        echo -e " ${GREEN}●${NC} ${YELLOW}内存与交换分区状态${NC}"
+        free -h | grep -E "^Mem|^内存|^Swap|^交换"
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        
+        # 2. 磁盘 IO (会有 1s 延迟阻塞)
+        _display_disk_io
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        
+        # 3. 基础磁盘使用
+        DISK_LIVE=$(df -h / 2>/dev/null | awk 'NR==2{printf "%s / %s (%s)", $3, $2, $5}')
+        echo -e " ${GREEN}●${NC} 根分区占用: ${CYAN}${DISK_LIVE}${NC}"
+        
+        echo -e "\n [R] 手动刷新 | [D] 详细磁盘分区 | [Q] 返回二级菜单"
+        
+        read -t 5 -n 1 -s -p "已开启自动刷新 (5s)... " key
+        case "$key" in
+            [Dd]) 
+                clear
+                _display_disk_usage
+                read -p "按回车键返回监控中心..."
+                ;;
+            [Rr]) continue ;;
+            [Qq]) return ;;
+        esac
+    done
+}
+
 # Nginx 菜单重构
 nginx_menu() {
     while true; do
         clear
         echo -e "${GREEN}==============================================${NC}"
-        echo -e "${GREEN}      服务 / 站点实时监控中心 (二级菜单)      ${NC}"
+        echo -e "${GREEN}      系统资源与服务监控中心 (二级菜单)      ${NC}"
         echo -e "${GREEN}==============================================${NC}"
         echo " 1. 查看 Nginx 配置列表与站点映射"
         echo " 2. 查看系统应用资源占用 (Top 15)"
         echo " 3. 筛选 Web 相关服务状态 (Nginx/Java/PHP...)"
+        echo " 4. 系统内存与磁盘 I/O 实时监控 (TUI)"
+        echo " 5. 详细磁盘分区与挂载状态查看"
         echo " 0. 返回主菜单"
         echo -e "${GREEN}==============================================${NC}"
-        read -p "请选择操作 [0-3]: " nginx_choice
+        read -p "请选择操作 [0-5]: " nginx_choice
 
         case $nginx_choice in
             1) nginx_config_view ;;
@@ -171,6 +252,12 @@ nginx_menu() {
                 _display_process_table "$web_keywords"
                 read -p "按回车键继续..."
                 _app_monitor_view 
+                ;;
+            4) _resource_monitoring_view ;;
+            5) 
+                clear
+                _display_disk_usage
+                read -p "按回车键返回..."
                 ;;
             0) break ;;
             *) echo -e "${RED}无效输入。${NC}"; sleep 1 ;;

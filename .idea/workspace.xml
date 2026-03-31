@@ -4,9 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="2fd15132-d902-4914-bfb1-624deecd9e32" name="更改" comment="tui美化">
-      <change beforePath="$PROJECT_DIR$/install_system.sh" beforeDir="false" afterPath="$PROJECT_DIR$/install_system.sh" afterDir="false" />
-    </list>
+    <list default="true" id="2fd15132-d902-4914-bfb1-624deecd9e32" name="更改" comment="tui美化" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -101,7 +99,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1751245113750</updated>
-      <workItem from="1774678808358" duration="22891000" />
+      <workItem from="1774678808358" duration="24455000" />
     </task>
     <task id="LOCAL-00001" summary="更新说明">
       <option name="closed" value="true" />
