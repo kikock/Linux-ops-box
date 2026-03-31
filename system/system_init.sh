@@ -123,26 +123,26 @@ while true; do
     echo -e "${CYAN}======================================================${NC}"
     _draw_menu_header
     echo -e "${GREEN}================== 运维指令中心 ==================${NC}"
-    echo " 1. SSH 远程安全配置 (证书/端口/防爆破)"
-    echo " 2. 系统软件包更新 (清理冗余/内核升级)"
-    echo " 3. 系统环境优化 (源/BBR/Swap/时区)"
-    echo " 4. 网络 IP 管理 (静态IP/网卡诊断)"
-    echo " 5. 服务/站点实时监控中心"
-    echo " 6. 常用专家工具集安装 (最小化系统必备)"
-    echo " 7. 防火墙安全管理中心 (UFW/FirewallD)"
+    echo " 1. 系统软件包更新 (清理冗余/内核升级)"
+    echo " 2. 系统环境深度优化 (源/BBR/Swap/时区)"
+    echo " 3. 常用专家工具集安装 (最小化系统必备)"
+    echo " 4. SSH 远程安全加固 (证书/端口/防爆破)"
+    echo " 5. 防火墙安全管理中心 (UFW/FirewallD)"
+    echo " 6. 网络 IP 与网卡诊断 (静态IP/路由)"
+    echo " 7. 服务/站点实时监控中心 (进程/Nginx)"
     echo -e "${RED} 9. 彻底卸载此工具箱 (清理自启动与链接)${NC}"
     echo " 0. 退出工具箱"
     echo -e "${GREEN}==================================================${NC}"
-    read -p "请输入指令编号 [0-9]: " choice < /dev/tty
+    read -p "请输入指令编号 [0-7, 9]: " choice < /dev/tty
 
     case $choice in
-        1) ssh_menu ;;
-        2) update_system_packages ;;
-        3) system_optimization_menu ;;
-        4) network_menu ;;
-        5) nginx_menu ;;
-        6) install_common_tools ;;
-        7) firewall_menu ;;
+        1) update_system_packages ;;
+        2) system_optimization_menu ;;
+        3) install_common_tools ;;
+        4) ssh_menu ;;
+        5) firewall_menu ;;
+        6) network_menu ;;
+        7) nginx_menu ;;
         9) 
             echo -e "${YELLOW}警告: 即将执行彻底卸载程序...${NC}"
             read -p "是否确认从系统中移除 Linux-ops-box? [y/N]: " confirm
