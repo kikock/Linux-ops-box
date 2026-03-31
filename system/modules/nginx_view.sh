@@ -105,9 +105,9 @@ _display_process_table() {
         # 内存转换 (RSS 是 KB)
         local mem_str
         if [ "$rss" -gt 1048576 ]; then
-            mem_str=$(echo "scale=1; $rss/1024/1024" | bc)G
+            mem_str=$(awk "BEGIN {printf \"%.1f\", $rss/1024/1024}")G
         elif [ "$rss" -gt 1024 ]; then
-            mem_str=$(echo "scale=1; $rss/1024" | bc)M
+            mem_str=$(awk "BEGIN {printf \"%.1f\", $rss/1024}")M
         else
             mem_str="${rss}K"
         fi

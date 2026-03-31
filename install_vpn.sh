@@ -321,12 +321,6 @@ network_diagnosis() {
     echo -e "${CYAN}       游戏联机环境与网速诊断工具             ${NC}"
     echo -e "${CYAN}======================================================${NC}"
 
-    # 检测 bc 依赖
-    if ! command -v bc &>/dev/null; then
-        echo -e "  ⏳ 正在补充依赖 [bc] ..."
-        ${PKG_MGR} install -y bc &>/dev/null
-    fi
-
     # 1. 本机 IP 与地理位置信息
     echo -e "${YELLOW}[1] 本机网络身份探测:${NC}"
     # 使用多源对冲机制，防止单一 API 失效
@@ -363,9 +357,9 @@ network_diagnosis() {
         [ -z "$result" ] && result=$(echo "$ping_out" | grep 'avg' | awk -F'/' '{print $5}')
 
         if [ -n "$result" ]; then
-            if (( $(echo "$result < 50" | bc -l) )); then
+            if awk "BEGIN {exit !($result < 50)}"; then
                 echo -e "${GREEN}${result} ms (极佳)${NC}"
-            elif (( $(echo "$result < 150" | bc -l) )); then
+            elif awk "BEGIN {exit !($result < 150)}"; then
                 echo -e "${YELLOW}${result} ms (一般)${NC}"
             else
                 echo -e "${RED}${result} ms (高延迟)${NC}"
@@ -392,11 +386,11 @@ network_diagnosis() {
         local SPEED_INFO=$(curl -L -s -o /dev/null -w "%{speed_download}" --max-time 15 https://speed.cloudflare.com/__down?bytes=10485760)
         
         # 算力换算与着色优化
-        if [ -n "$SPEED_INFO" ] && (( $(echo "$SPEED_INFO > 0" | bc -l) )); then
-            local MB_PER_SEC=$(echo "scale=2; $SPEED_INFO / 1048576" | bc -l)
+        if [ -n "$SPEED_INFO" ] && awk "BEGIN {exit !($SPEED_INFO > 0)}"; then
+            local MB_PER_SEC=$(awk "BEGIN {printf \"%.2f\", $SPEED_INFO / 1048576}")
             local S_COLOR="${RED}"
-            if (( $(echo "$MB_PER_SEC > 2" | bc -l) )); then S_COLOR="${YELLOW}"; fi
-            if (( $(echo "$MB_PER_SEC > 10" | bc -l) )); then S_COLOR="${GREEN}"; fi
+            if awk "BEGIN {exit !($MB_PER_SEC > 2)}"; then S_COLOR="${YELLOW}"; fi
+            if awk "BEGIN {exit !($MB_PER_SEC > 10)}"; then S_COLOR="${GREEN}"; fi
             echo -e "${S_COLOR}${MB_PER_SEC} MB/s${NC}"
         else
             echo -e "${RED}测速异常 (请检查链路或 DNS)${NC}"
@@ -418,7 +412,7 @@ domain_route_analysis() {
     echo -e "${CYAN}======================================================${NC}"
 
     # 检查并安装必要工具
-    for cmd in traceroute mtr bc; do
+    for cmd in traceroute mtr; do
         if ! command -v $cmd &>/dev/null; then
             echo -e "${YELLOW}正在安装缺失工具: $cmd...${NC}"
             [ -n "$PKG_MGR" ] && ${PKG_MGR} install -y $cmd &>/dev/null
@@ -439,7 +433,7 @@ domain_route_analysis() {
     IFS='|' read -r DNS_T TCP_T TTFB_T TOTAL_T <<< "$CURL_DATA"
 
     # 判定是否连接失败 (如果总时间 >= 10 且后续阶段为 0)
-    if (( $(echo "$TOTAL_T >= 10" | bc -l 2>/dev/null || echo 0) )) && (( $(echo "$TCP_T == 0" | bc -l 2>/dev/null || echo 0) )); then
+    if awk "BEGIN {exit !($TOTAL_T >= 10 && $TCP_T == 0)}"; then
         echo -e "    状态反馈:   ${RED}⚠ 目标连接超时或 80 端口未开放${NC}"
     else
         printf "    %-12s: ${CYAN}%s${NC} s\n" "DNS 解析" "${DNS_T}"
