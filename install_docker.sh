@@ -21,8 +21,37 @@ fi
 
 # 基础环境变量环境探测
 ARCH=$(uname -m)
-DOCKER_ARCH="x86_64"
-[ "$ARCH" = "aarch64" ] && DOCKER_ARCH="aarch64"
+case "$ARCH" in
+    x86_64)
+        DOCKER_ARCH="x86_64"
+        COMPOSE_ARCH="x86_64"
+        ;;
+    aarch64|arm64)
+        DOCKER_ARCH="aarch64"
+        COMPOSE_ARCH="aarch64"
+        ;;
+    armv7l|armv7)
+        DOCKER_ARCH="armhf"
+        COMPOSE_ARCH="armv7"
+        ;;
+    armv6l|armv6)
+        DOCKER_ARCH="armel"
+        COMPOSE_ARCH="armv6"
+        ;;
+    ppc64le)
+        DOCKER_ARCH="ppc64le"
+        COMPOSE_ARCH="ppc64le"
+        ;;
+    s390x)
+        DOCKER_ARCH="s390x"
+        COMPOSE_ARCH="s390x"
+        ;;
+    *)
+        echo -e "${RED}警告: 未知/非常规架构 $ARCH，默认使用 x86_64。${NC}"
+        DOCKER_ARCH="x86_64"
+        COMPOSE_ARCH="x86_64"
+        ;;
+esac
 
 # ================================================================
 # 私有辅助函数: 网络探测与镜像分配
@@ -158,7 +187,7 @@ perform_install() {
     fi
     
     # 2. 下载 Compose 
-    local C_DL_URL="${MIRROR}/docker/compose/releases/download/${CHOSEN_C}/docker-compose-linux-${DOCKER_ARCH}"
+    local C_DL_URL="${MIRROR}/docker/compose/releases/download/${CHOSEN_C}/docker-compose-linux-${COMPOSE_ARCH}"
     echo -e "${YELLOW} -> 正在拉取 Docker Compose 工具包...${NC}"
     if ! curl -L -f -# -o /usr/local/bin/docker-compose "$C_DL_URL"; then
          echo -e "${RED}致命错误: Compose 版本下载失败 (404)。${NC}"

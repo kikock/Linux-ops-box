@@ -283,6 +283,156 @@ EOF
     done
 }
 
+manage_disk_mount() {
+    clear
+    echo -e "${YELLOW}================ 硬盘信息与交互式挂载 ================${NC}"
+    echo -e "${BLUE}当前存储设备列表 (排除 loop 设备):${NC}"
+    lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT | grep -v 'loop'
+    echo -e "--------------------------------------------------------"
+    read -p "请输入要操作的磁盘名称 (如 /dev/sdb)，或输入 0 返回: " disk_name
+    if [[ -z "$disk_name" || "$disk_name" == "0" ]]; then
+        return
+    fi
+
+    if [ ! -b "$disk_name" ]; then
+        echo -e "${RED}错误: 找不到指定的设备 $disk_name${NC}"
+        sleep 2
+        return
+    fi
+    
+    # 检测是否已经挂载
+    if lsblk -no MOUNTPOINT "$disk_name" | grep -q "/"; then
+        echo -e "${RED}警告: 该设备或其分区已被挂载！请先卸载。${NC}"
+        sleep 2
+        return
+    fi
+
+    echo -e "\n${YELLOW}选项 1: 直接挂载已有文件系统的磁盘 (不格式化)${NC}"
+    echo -e "${YELLOW}选项 2: 格式化为 ext4 并挂载 (将清空数据！)${NC}"
+    read -p "请选择操作 [1/2, 输入其他返回]: " op_type
+    
+    if [[ "$op_type" == "2" ]]; then
+        read -p "【危险】确定要格式化 $disk_name 为 ext4 吗？(格式化会清空数据) [y/N]: " confirm_format
+        if [[ "$confirm_format" =~ ^[Yy]$ ]]; then
+            echo -e "${YELLOW}正在格式化 $disk_name 为 ext4...${NC}"
+            mkfs.ext4 -F "$disk_name"
+            if [ $? -ne 0 ]; then
+                echo -e "${RED}错误: 格式化失败。${NC}"
+                sleep 2
+                return
+            fi
+            echo -e "${GREEN}格式化成功！${NC}"
+        else
+            echo -e "${BLUE}已取消格式化。${NC}"
+            return
+        fi
+    elif [[ "$op_type" != "1" ]]; then
+        return
+    fi
+
+    read -p "请输入挂载点目录 (例如 /data): " mount_point
+    if [[ -z "$mount_point" ]]; then
+        echo -e "${RED}挂载点不能为空。${NC}"; sleep 2; return
+    fi
+    
+    if [ ! -d "$mount_point" ]; then
+        mkdir -p "$mount_point"
+        echo -e "${GREEN}已创建挂载点目录: $mount_point${NC}"
+    fi
+
+    # 获取 UUID
+    UUID=$(blkid -s UUID -o value "$disk_name")
+    if [[ -z "$UUID" ]]; then
+        echo -e "${YELLOW}无法获取 UUID，将使用设备路径 $disk_name 挂载。${NC}"
+        MOUNT_SRC="$disk_name"
+    else
+        MOUNT_SRC="UUID=$UUID"
+    fi
+
+    # 尝试挂载
+    mount "$disk_name" "$mount_point"
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}成功挂载 $disk_name 到 $mount_point${NC}"
+        # 写入 fstab
+        if ! grep -q "$mount_point" /etc/fstab; then
+            echo "$MOUNT_SRC $mount_point ext4 defaults 0 0" >> /etc/fstab
+            echo -e "${GREEN}已将挂载信息写入 /etc/fstab，实现开机自启。${NC}"
+        else
+            echo -e "${YELLOW}警告: /etc/fstab 中已存在关于 $mount_point 的配置，未重复写入。${NC}"
+        fi
+    else
+        echo -e "${RED}挂载失败，请检查文件系统。${NC}"
+    fi
+    read -p "按回车键返回..."
+}
+
+manage_proxy_session() {
+    while true; do
+        clear
+        echo -e "${YELLOW}================ 终端会话代理配置 ================${NC}"
+        echo -e "${BLUE}>>> 当前脚本及终端会话代理状态 <<<${NC}"
+        echo -e "HTTP_PROXY:  ${http_proxy:-未设置}"
+        echo -e "HTTPS_PROXY: ${https_proxy:-未设置}"
+        echo -e "ALL_PROXY:   ${all_proxy:-未设置}"
+        echo -e "NO_PROXY:    ${no_proxy:-未设置}"
+        echo -e "--------------------------------------------------------"
+        echo -e "1. 增加/修改临时代理 (仅当前工具箱会话生效)"
+        echo -e "2. 追加代理到 ~/.bashrc (对未来打开的终端生效)"
+        echo -e "3. 清理当前及环境变量代理"
+        echo -e "0. 返回"
+        read -p "请选择操作 [0-3]: " proxy_choice
+
+        case "$proxy_choice" in
+            1|2)
+                read -p "请输入代理地址 (如 http://192.168.1.100:7890): " proxy_addr
+                if [[ -n "$proxy_addr" ]]; then
+                    export http_proxy="$proxy_addr"
+                    export https_proxy="$proxy_addr"
+                    export all_proxy="$proxy_addr"
+                    export no_proxy="localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+                    echo -e "${GREEN}当前会话代理已更新为: $proxy_addr${NC}"
+                    
+                    if [[ "$proxy_choice" == "2" ]]; then
+                        # 写入 .bashrc
+                        sed -i '/# === Ops-Box Proxy ===/d' ~/.bashrc
+                        sed -i '/export http_proxy=/d' ~/.bashrc
+                        sed -i '/export https_proxy=/d' ~/.bashrc
+                        sed -i '/export all_proxy=/d' ~/.bashrc
+                        sed -i '/export no_proxy=/d' ~/.bashrc
+                        echo "# === Ops-Box Proxy ===" >> ~/.bashrc
+                        echo "export http_proxy=\"$proxy_addr\"" >> ~/.bashrc
+                        echo "export https_proxy=\"$proxy_addr\"" >> ~/.bashrc
+                        echo "export all_proxy=\"$proxy_addr\"" >> ~/.bashrc
+                        echo "export no_proxy=\"localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16\"" >> ~/.bashrc
+                        echo -e "${GREEN}已写入 ~/.bashrc，新终端登录将自动生效。${NC}"
+                    fi
+                else
+                    echo -e "${RED}代理地址不能为空！${NC}"
+                fi
+                sleep 2
+                ;;
+            3)
+                unset http_proxy https_proxy all_proxy no_proxy
+                sed -i '/# === Ops-Box Proxy ===/d' ~/.bashrc
+                sed -i '/export http_proxy=/d' ~/.bashrc
+                sed -i '/export https_proxy=/d' ~/.bashrc
+                sed -i '/export all_proxy=/d' ~/.bashrc
+                sed -i '/export no_proxy=/d' ~/.bashrc
+                echo -e "${GREEN}代理已彻底清除。${NC}"
+                sleep 2
+                ;;
+            0)
+                break
+                ;;
+            *)
+                echo -e "${RED}无效输入。${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+
 system_optimization_menu() {
     # 定义颜色常量 (如果外部未定义)
     local GREEN='\033[0;32m'
@@ -307,9 +457,11 @@ system_optimization_menu() {
         echo -e " 3. 配置 2GB zRAM 虚拟内存 (高压缩比)"
         echo -e " 4. 清除 zRAM/Swap 所有相关配置"
         echo -e " 5. 设置系统时区为上海 (Asia/Shanghai)"
+        echo -e " 6. 获取硬盘信息并交互式挂载"
+        echo -e " 7. 配置终端网络代理 (临时/全局直连)"
         echo -e " 0. 返回主菜单"
         echo -e "${GREEN}==============================================${NC}"
-        read -p "请选择操作 [0-5]: " opt_choice
+        read -p "请选择操作 [0-7]: " opt_choice
 
         case $opt_choice in
             1)
@@ -386,12 +538,18 @@ EOF
                 echo -e "${GREEN}成功: 当前系统时间: $(date)${NC}"
                 read -p "按回车键继续..."
                 ;;
+            6)
+                manage_disk_mount
+                ;;
+            7)
+                manage_proxy_session
+                ;;
             0)
                 echo -e "${BLUE}返回中...${NC}"
                 break
                 ;;
             *)
-                echo -e "${RED}输入有误，请输入 0-5 之间的数字。${NC}"
+                echo -e "${RED}输入有误，请输入 0-7 之间的数字。${NC}"
                 sleep 1
                 ;;
         esac
