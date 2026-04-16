@@ -287,7 +287,7 @@ manage_disk_mount() {
     clear
     echo -e "${YELLOW}================ 硬盘信息与交互式挂载 ================${NC}"
     echo -e "${BLUE}当前存储设备列表 (排除 loop 设备):${NC}"
-    lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT | grep -v 'loop'
+    lsblk -p -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT | grep -v 'loop'
     echo -e "--------------------------------------------------------"
     read -p "请输入要操作的磁盘名称 (如 /dev/sdb)，或输入 0 返回: " disk_name
     if [[ -z "$disk_name" || "$disk_name" == "0" ]]; then

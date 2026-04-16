@@ -246,7 +246,8 @@ configure_static_ip() {
     # 第 4 步：输入 DNS 服务器
     echo -e "\n${YELLOW}第 4 步: 输入 DNS 服务器${NC}"
     echo -e "  示例: 8.8.8.8,114.114.114.114 (多个用逗号分隔)"
-    read -p "请输入 DNS: " DNS_INPUT
+    read -p "请输入 DNS [默认: 223.5.5.5,114.114.114.114]: " DNS_INPUT
+    DNS_INPUT=${DNS_INPUT:-223.5.5.5,114.114.114.114}
 
     # 第 5 步：确认配置预览
     echo -e "\n${BLUE}============ 配置预览 ============${NC}"

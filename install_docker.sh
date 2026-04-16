@@ -64,6 +64,54 @@ _get_gh_mirror() {
     fi
 }
 
+# 镜像源自动探测 (源自 install_cloudwaf.sh)
+_check_docker_mirrors() {
+    echo -e "${CYAN}⏳ 正在选择最快的 Docker 下载源...${NC}"
+    local ser_names=("mirrors.ustc.edu.cn/docker-ce" "mirrors.tuna.tsinghua.edu.cn/docker-ce" "mirrors.aliyun.com/docker-ce" "mirror.azure.cn/docker-ce" "download.docker.com")
+    local tmp_file1="/dev/shm/dock_test1.pl"
+    local tmp_file2="/dev/shm/dock_test2.pl"
+    rm -f $tmp_file1 $tmp_file2
+    touch $tmp_file1 $tmp_file2
+
+    for ser_name in "${ser_names[@]}"; do
+        local check=$(curl -k -s -m 5 -w "%{http_code} %{time_total}" "https://${ser_name}" -o /dev/null)
+        local status=$(echo $check | awk '{print $1}')
+        local rtt=$(echo $check | awk '{print $2*1000}' | cut -d. -f1)
+        
+        if [[ "$status" =~ ^(200|301|403)$ ]]; then
+            if [ $rtt -lt 200 ]; then
+                echo "$ser_name" >> $tmp_file1
+            else
+                echo "$rtt $ser_name" >> $tmp_file2
+            fi
+        fi
+    done
+
+    local best_node=$(head -n 1 $tmp_file1)
+    [[ -z "$best_node" ]] && best_node=$(sort -n $tmp_file2 | head -n 1 | awk '{print $2}')
+    [[ -z "$best_node" ]] && best_node="download.docker.com"
+
+    rm -f $tmp_file1 $tmp_file2
+    
+    case "$best_node" in
+        *aliyun.com*)   DOCKER_BASE_URL="https://mirrors.aliyun.com/docker-ce" ;;
+        *azure.cn*)     DOCKER_BASE_URL="https://mirror.azure.cn/docker-ce" ;;
+        *ustc.edu.cn*)  DOCKER_BASE_URL="https://mirrors.ustc.edu.cn/docker-ce" ;;
+        *tsinghua.edu.cn*) DOCKER_BASE_URL="https://mirrors.tuna.tsinghua.edu.cn/docker-ce" ;;
+        *)              DOCKER_BASE_URL="https://download.docker.com" ;;
+    esac
+    echo -e " ✅ 已选择源: ${GREEN}${DOCKER_BASE_URL}${NC}"
+}
+
+_get_dist_info() {
+    if [ -r /etc/os-release ]; then
+        LSB_DIST=$(. /etc/os-release && echo "$ID")
+        LSB_DIST=$(echo "$LSB_DIST" | tr '[:upper:]' '[:lower:]')
+        DIST_VERSION=$(. /etc/os-release && echo "$VERSION_ID")
+        DIST_CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+    fi
+}
+
 # ================================================================
 # 1. 检测 Docker 当前安装状态与配置
 # ================================================================
@@ -134,38 +182,96 @@ manage_docker_service() {
 # ================================================================
 perform_install() {
     clear
+    _get_dist_info
+    _check_docker_mirrors
+    
+    echo -e "\n${BLUE}================ 安装模式选择 ================${NC}"
+    echo " 1. [推荐] 软件包模式 (使用 Repo 自动管理依赖)"
+    echo " 2. [兼容] 静态编译模式 (解压即用，适合全发行版)"
+    echo -e "${BLUE}==============================================${NC}"
+    read -p "请选择安装模式 [1-2, 默认1]: " install_mode < /dev/tty
+    install_mode=${install_mode:-1}
+
+    if [ "$install_mode" == "1" ]; then
+        install_via_repo
+    else
+        install_via_binary
+    fi
+}
+
+install_via_repo() {
+    echo -e "\n${CYAN}🚀 开始通过软件源安装 Docker...${NC}"
+    case "$LSB_DIST" in
+        ubuntu|debian|raspbian)
+            apt-get update
+            apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
+            mkdir -p /etc/apt/keyrings
+            curl -fsSL "${DOCKER_BASE_URL}/linux/${LSB_DIST}/gpg" | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] ${DOCKER_BASE_URL}/linux/${LSB_DIST} ${DIST_CODENAME:-$DIST_VERSION} stable" > /etc/apt/sources.list.d/docker.list
+            apt-get update
+            apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            ;;
+        centos|rhel|ol|tencentos|alinux|anolis|rocky|almalinux|opencloudos|openeuler|hce|uos|amzn)
+            yum install -y yum-utils
+            local repo_dist=$LSB_DIST
+            [[ "$LSB_DIST" =~ ^(ol|tencentos|alinux|anolis|opencloudos|openeuler|hce|uos|amzn|rocky|almalinux)$ ]] && repo_dist="centos"
+            
+            yum-config-manager --add-repo "${DOCKER_BASE_URL}/linux/${repo_dist}/docker-ce.repo"
+            sed -i "s|https://download.docker.com|${DOCKER_BASE_URL}|g" /etc/yum.repos.d/docker-ce.repo
+            
+            # 针对特殊系统的版本修正
+            if [ "$LSB_DIST" = "openeuler" ] || [ "$LSB_DIST" = "hce" ] || [ "$LSB_DIST" = "opencloudos" ] || [ "$LSB_DIST" = "amzn" ]; then
+                 sed -i "s|\$releasever|8|g" /etc/yum.repos.d/docker-ce.repo
+            fi
+
+            local conflicting=""
+            [[ $(cat /etc/os-release | grep "NAME") =~ (Stream|Rocky|AlmaLinux|EulerOS) ]] && conflicting="--allowerasing"
+            
+            yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin $conflicting
+            ;;
+        *)
+            echo -e "${RED}❌ 暂不支持该发行版的 Repo 自动安装，尝试转回静态编译模式...${NC}"
+            sleep 2
+            install_via_binary
+            return
+            ;;
+    esac
+    
+    systemctl enable --now docker
+    echo -e "\n${GREEN}🎉 Repo 部署完成!${NC}"
+    docker -v
+    docker compose version
+    read -p "按回车返回菜单..." < /dev/tty
+}
+
+install_via_binary() {
     echo -e "${CYAN}--- 自动化版本检索机制启动 ---${NC}"
     
     local MIRROR=$(_get_gh_mirror)
-    echo -e "  🌐 镜像采集线路: ${MIRROR}"
+    echo -e "  🌐 GitHub 代理线路: ${MIRROR}"
 
-    # 精准抓取 Docker 静态版三段式版号 (如 27.x.x)
-    echo -e "  ⏳ 正在采集 Docker 官方静态离线源列表..."
-    local DOCKER_URL="https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/"
-    local RAW_D_TAGS=$(curl -sL --connect-timeout 5 "$DOCKER_URL" | grep -oE 'docker-[0-9]+\.[0-9]+\.[0-9]+\.tgz' | sed 's/docker-//;s/\.tgz//' | sort -uV | tail -n 8)
-    
-    # 填充数组 
-    IFS=$'\n' read -rd '' -a D_VERSIONS <<<"$RAW_D_TAGS"
-    
-    if [ ${#D_VERSIONS[@]} -eq 0 ]; then
-        echo -e "${YELLOW}⚠ 无法动态解析官网版本，启用默认推荐版 (26.1.3)${NC}"
-        D_VERSIONS=("24.0.9" "25.0.3" "26.1.3")
+    # 如果 DOCKER_BASE_URL 指向国内镜像，则从镜像站抓取，否则用官网
+    local STATIC_URL="https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/"
+    if [[ "$DOCKER_BASE_URL" != *"download.docker.com"* ]]; then
+        STATIC_URL="${DOCKER_BASE_URL}/linux/static/stable/${DOCKER_ARCH}/"
     fi
 
-    # 精准抓取 Compose V2.x 的稳定发行版 (过滤 alpha/rc)
-    echo -e "  ⏳ 正在采集 Docker Compose 发布记录 (GitHub API)..."
-    local RAW_C_TAGS=$(curl -sL --connect-timeout 5 "https://api.github.com/repos/docker/compose/releases" | grep '"tag_name":' | grep -oE 'v2\.[0-9]+\.[0-9]+' | sort -ur | head -n 6)
+    echo -e "  ⏳ 正在采集 Docker 官方静态离线源列表..."
+    local RAW_D_TAGS=$(curl -sL --connect-timeout 5 "$STATIC_URL" | grep -oE 'docker-[0-9]+\.[0-9]+\.[0-9]+\.tgz' | sed 's/docker-//;s/\.tgz//' | sort -uV | tail -n 8)
+    
+    IFS=$'\n' read -rd '' -a D_VERSIONS <<<"$RAW_D_TAGS"
+    if [ ${#D_VERSIONS[@]} -eq 0 ]; then
+        echo -e "${YELLOW}⚠ 无法动态解析官网版本，启用默认推荐版${NC}"
+        D_VERSIONS=("24.0.9" "25.0.3" "26.1.3" "27.0.3")
+    fi
+
+    echo -e "  ⏳ 正在采集 Docker Compose 发布记录..."
+    local RAW_C_TAGS=$(curl -sL --connect-timeout 5 "${MIRROR}/docker/compose/releases" | grep -oE 'v2\.[0-9]+\.[0-9]+' | sort -ur | head -n 6)
     IFS=$'\n' read -rd '' -a C_VERSIONS <<<"$RAW_C_TAGS"
     
     if [ ${#C_VERSIONS[@]} -eq 0 ]; then
-        echo -e "${YELLOW}⚠ GitHub 抓取受阻，启用默认推荐版 (v2.28.1)${NC}"
         C_VERSIONS=("v2.26.1" "v2.27.0" "v2.28.1")
     fi
-
-    echo -e "\n${BLUE}--- 可供安装的版本对齐如下 ---${NC}"
-    echo -e " [Docker 推荐]: ${YELLOW}${D_VERSIONS[*]}${NC}"
-    echo -e " [Compose 推荐]: ${YELLOW}${C_VERSIONS[*]}${NC}"
-    echo -e "${BLUE}---------------------------------${NC}"
 
     local DEFAULT_D="${D_VERSIONS[-1]}"
     local DEFAULT_C="${C_VERSIONS[0]}"
@@ -175,33 +281,27 @@ perform_install() {
     read -p "请输入 Compose 版本 (默认 $DEFAULT_C): " CHOSEN_C < /dev/tty
     CHOSEN_C=${CHOSEN_C:-$DEFAULT_C}
 
-    echo -e "\n🚀 ${GREEN}任务开始: 安装 Docker $CHOSEN_D \u0026 Compose $CHOSEN_C${NC}"
+    echo -e "\n🚀 ${GREEN}任务开始: 安装 Docker $CHOSEN_D & Compose $CHOSEN_C${NC}"
 
-    # 1. 下载 Docker 并校验文件格式
-    local D_DL_URL="https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-${CHOSEN_D}.tgz"
-    echo -e "${YELLOW} -> 正在拉取 Docker 核心镜像包...${NC}"
+    local D_DL_URL="${STATIC_URL}docker-${CHOSEN_D}.tgz"
+    local C_DL_URL="${MIRROR}/docker/compose/releases/download/${CHOSEN_C}/docker-compose-linux-${COMPOSE_ARCH}"
+
     rm -f /tmp/docker_bin.tgz /tmp/docker -rf
     if ! curl -L -f -# -o /tmp/docker_bin.tgz "$D_DL_URL"; then
-        echo -e "${RED}致命错误: Docker 版本包下载失败 (404)，该版本可能已官方下架。${NC}"
+        echo -e "${RED}❌ 下载失败，请检查网络或版本号。${NC}"
         return 1
     fi
     
-    # 2. 下载 Compose 
-    local C_DL_URL="${MIRROR}/docker/compose/releases/download/${CHOSEN_C}/docker-compose-linux-${COMPOSE_ARCH}"
-    echo -e "${YELLOW} -> 正在拉取 Docker Compose 工具包...${NC}"
     if ! curl -L -f -# -o /usr/local/bin/docker-compose "$C_DL_URL"; then
-         echo -e "${RED}致命错误: Compose 版本下载失败 (404)。${NC}"
+         echo -e "${RED}❌ Compose 下载失败。${NC}"
          return 1
     fi
 
-    # 执行解压注入
-    echo -e "${YELLOW} -> 正在解压并挂载系统调令...${NC}"
     tar -xzf /tmp/docker_bin.tgz -C /tmp/
     cp -f /tmp/docker/* /usr/bin/
     chmod +x /usr/local/bin/docker-compose
     ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
 
-    # 构建并注册服务 (Daemon Config)
     if [ ! -f /etc/systemd/system/docker.service ]; then
         cat > /etc/systemd/system/docker.service << 'EOF'
 [Unit]
@@ -231,7 +331,7 @@ EOF
     systemctl daemon-reload
     systemctl enable --now docker
     
-    echo -e "\n${GREEN}🎉 部署完成! 当前系统响应:${NC}"
+    echo -e "\n${GREEN}🎉 静态部署完成!${NC}"
     docker -v
     docker-compose -v
     read -p "安装工作已就绪，按回车返回菜单..." < /dev/tty

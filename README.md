@@ -13,13 +13,18 @@
 
 ## 🚀 1. 系统初始化工具箱 (ck_sysinit)
 
-用于服务器首选的初始化流程，包括 SSH 安全防范、网络配置、系统优化等。
+用于服务器首选的初始化流程，涵盖基础环境搭建、安全边界加固、纯 Shell 微型状态监控以及高频故障排查机制。
 
 ### 快捷安装 (大陆加速版):
 ```bash
 curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_system.sh | sudo bash
 ```
-> 安装完成后，在任何目录输入 `ck_sysinit` 即可呼出管理菜单。
+> 安装完成后，在任何目录输入 `ck_sysinit` 即可呼出管理菜单；支持使用 `ck_sysinit --uninstall` 彻底清理环境。
+
+### 核心功能 (近期更新):
+1. **交互式资源配置**: 新建交互式探测硬盘阵列一键挂载模块，以及终端代理 (Terminal Proxy) 全局配置模块。
+2. **无依赖性能监视大屏**: 提供基于原生 `awk` (移除对 bc 的强依赖) 的实时监控底座，整合 CPU/内存/磁盘 IO/常驻进程开销统计，及 Nginx 深度状态检测。
+3. **菜单动态排序与防御**: 标准底座全面重构 TUI 菜单分层，加入基础依赖健康检查，无缝向下兼容老版 Debian 系列及 CentOS 端。
 
 ---
 
@@ -36,6 +41,7 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 1. **实时采集**: 自动从 Docker 官网与 Github API 抓取最近 8 个稳定版本供选择。
 2. **状态感知**: 启动即显示当前引擎版本、运行状态与编排工具状态。
 3. **运维集成**: 内置启动、停止、重启、查看 `daemon.json` 等高频运维指令。
+4. **多架构感知与深层适配**: 自适应识别 CPU 架构 (支持 x86_64 及 aarch64)，并深度兼容如 Ubuntu 22.04 (Jammy) 等现代发行版的内置官方软件源交互。
 
 ---
 
