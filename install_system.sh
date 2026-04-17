@@ -13,8 +13,12 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# 定义版本号 (以更新日期为准)
+VERSION="2026.04.17"
+
 echo -e "${BLUE}==============================================${NC}"
 echo -e "${GREEN}      Linux-ops-box 终极运维工具箱快捷部署     ${NC}"
+echo -e "${CYAN}             版本号: v${VERSION}                ${NC}"
 echo -e "${BLUE}==============================================${NC}"
 
 # 1. 权限检测
@@ -29,7 +33,7 @@ REPO_URL="https://github.com/kikock/Linux-ops-box.git"
 # 定义默认拉取分支 (正式版建议设为 main)
 REPO_BRANCH="main"
 
-# 2. 卸载逻辑触发
+# 2. 卸载与更新逻辑触发
 if [[ "$1" == "--uninstall" ]] || [[ "$1" == "-u" ]]; then
     echo -e "${YELLOW}==============================================${NC}"
     echo -e "${YELLOW}  正在启动 Linux-ops-box 卸载程序...          ${NC}"
@@ -50,14 +54,27 @@ if [[ "$1" == "--uninstall" ]] || [[ "$1" == "-u" ]]; then
         echo -e "${CYAN}已取消卸载操作。${NC}"
         exit 0
     fi
+elif [[ "$1" == "--update" ]] || [[ "$1" == "-up" ]]; then
+    echo -e "${BLUE}==============================================${NC}"
+    echo -e "${CYAN}  正在启动 Linux-ops-box 在线更新程序...      ${NC}"
+    echo -e "${BLUE}==============================================${NC}"
+    echo -e "  ⏳ 正在准备云端重装环境..."
+    # 模拟进入云端安装模式，直接通过当前脚本执行安装流程即可
+    # 如果用户是通过直接运行本地脚本带参数执行，则继续向下运行安装逻辑
+    # 如果是未来通过别名调用，逻辑也是一致的：重新同步云端/本地代码。
 fi
 
 # 3. 核心源码定位：自动判定是本地执行还是云端 curl 管道执行
 HAS_LOCAL_FILES=false
-if [ -d "$PWD/system" ] && [ -f "$PWD/system/system_init.sh" ]; then
-    HAS_LOCAL_FILES=true
-    SRC_DIR="$PWD/system"
-    echo -e "${GREEN}[本地源码检测] 发现 system/ 目录，将使用本地直接安装...${NC}"
+# 如果是更新模式，强制走云端下载流程
+if [[ "$1" == "--update" ]] || [[ "$1" == "-up" ]]; then
+    echo -e "${YELLOW}[更新模式] 正在忽略本地缓存，强制从云端获取最新版本...${NC}"
+else
+    if [ -d "$PWD/system" ] && [ -f "$PWD/system/system_init.sh" ]; then
+        HAS_LOCAL_FILES=true
+        SRC_DIR="$PWD/system"
+        echo -e "${GREEN}[本地源码检测] 发现 system/ 目录，将使用本地直接安装...${NC}"
+    fi
 fi
 
 if [ "$HAS_LOCAL_FILES" = false ]; then
@@ -177,6 +194,9 @@ if ! command -v ck_sysinit &>/dev/null; then
     echo -e "\n${YELLOW}提示: 检测到 /usr/local/bin 未在您的当前 PATH 中，请执行以下命令刷新环境：${NC}"
     echo -e "  ${CYAN}export PATH=\$PATH:/usr/local/bin && source /etc/profile${NC}"
 fi
+
+echo -e "\n${CYAN}提示: 如需更新版本，请执行以下命令：${NC}"
+echo -e "  🔥  ${YELLOW}ck_sysinit --update${NC}"
 
 echo -e "\n${BLUE}==============================================${NC}"
 exit 0
