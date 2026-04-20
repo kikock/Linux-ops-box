@@ -452,16 +452,17 @@ system_optimization_menu() {
         echo -e "${GREEN}==============================================${NC}"
         echo -e "${GREEN}            系统环境优化 (二级菜单)            ${NC}"
         echo -e "${GREEN}==============================================${NC}"
-        echo -e " 1. \u955c\u50cf\u6e90\u7ba1\u7406 (阿里云/清华/中科大/官方/还原)"
+        echo -e " 1. 镜像源管理 (阿里云/清华/中科大/官方/还原)"
         echo -e " 2. 开启内核 BBR 网络加速"
         echo -e " 3. 配置 2GB zRAM 虚拟内存 (高压缩比)"
         echo -e " 4. 清除 zRAM/Swap 所有相关配置"
         echo -e " 5. 设置系统时区为上海 (Asia/Shanghai)"
         echo -e " 6. 获取硬盘信息并交互式挂载"
         echo -e " 7. 配置终端网络代理 (临时/全局直连)"
+        echo -e " 8. 修复中文乱码 (locale/字体/编码一键修复)"
         echo -e " 0. 返回主菜单"
         echo -e "${GREEN}==============================================${NC}"
-        read -p "请选择操作 [0-7]: " opt_choice
+        read -p "请选择操作 [0-8]: " opt_choice
 
         case $opt_choice in
             1)
@@ -544,16 +545,152 @@ EOF
             7)
                 manage_proxy_session
                 ;;
+            8)
+                fix_chinese_locale
+                ;;
             0)
                 echo -e "${BLUE}返回中...${NC}"
                 break
                 ;;
             *)
-                echo -e "${RED}输入有误，请输入 0-7 之间的数字。${NC}"
+                echo -e "${RED}输入有误，请输入 0-8 之间的数字。${NC}"
                 sleep 1
                 ;;
         esac
     done
+}
+
+# ========== 中文乱码修复模块 ==========
+fix_chinese_locale() {
+    clear
+    echo -e "${GREEN}======================================================${NC}"
+    echo -e "${GREEN}      中文乱码一键修复 (Locale / 字体 / 编码)         ${NC}"
+    echo -e "${GREEN}======================================================${NC}"
+
+    # ---- 1. 检测当前 locale 状态 ----
+    echo -e "\n${BLUE}[1/5] 正在检测当前 locale 配置...${NC}"
+    CURRENT_LANG=$(locale 2>/dev/null | grep 'LANG=' | cut -d= -f2 | tr -d '"')
+    echo -e "  当前 LANG 值: ${YELLOW}${CURRENT_LANG:-未设置}${NC}"
+
+    if [[ "$CURRENT_LANG" == "zh_CN.UTF-8" ]]; then
+        echo -e "  ${GREEN}✓ LANG 已正确设置为 zh_CN.UTF-8${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ LANG 未正确设置，将进行修复...${NC}"
+    fi
+
+    # ---- 2. 按包管理器分发处理 ----
+    echo -e "\n${BLUE}[2/5] 正在检测系统发行版与包管理器...${NC}"
+    case "$PKG_MGR" in
+        apt)
+            echo -e "  检测到 Debian/Ubuntu 系列，使用 apt 处理...${NC}"
+
+            echo -e "\n${BLUE}[3/5] 正在更新软件索引...${NC}"
+            apt update -qq 2>&1 | tail -3
+
+            echo -e "\n${BLUE}[4/5] 正在安装中文 locale 支持包与字体...${NC}"
+            # 安装 locales 基础库
+            if ! dpkg -l locales &>/dev/null; then
+                apt install -y locales
+            fi
+
+            # Ubuntu 系列额外安装语言包
+            if grep -qi ubuntu /etc/os-release 2>/dev/null; then
+                apt install -y language-pack-zh-hans 2>/dev/null || true
+            fi
+
+            # 安装中文字体 (Noto CJK)
+            echo -e "  ⏳ 正在安装 Noto CJK 中文字体包...${NC}"
+            apt install -y fonts-noto-cjk 2>/dev/null || \
+                apt install -y fonts-wqy-zenhei fonts-wqy-microhei 2>/dev/null || \
+                echo -e "  ${YELLOW}⚠ 字体包安装失败，跳过（不影响终端 locale 修复）${NC}"
+
+            # 生成 zh_CN.UTF-8 locale
+            echo -e "\n  ⏳ 正在生成 zh_CN.UTF-8 locale...${NC}"
+            if ! locale -a 2>/dev/null | grep -qi 'zh_CN.utf8'; then
+                # 确保 locale.gen 中取消注释
+                if [ -f /etc/locale.gen ]; then
+                    sed -i 's/^# *zh_CN.UTF-8/zh_CN.UTF-8/' /etc/locale.gen
+                    # 若不存在则追加
+                    grep -q 'zh_CN.UTF-8' /etc/locale.gen || echo 'zh_CN.UTF-8 UTF-8' >> /etc/locale.gen
+                fi
+                locale-gen zh_CN.UTF-8 2>&1
+                update-locale LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 2>/dev/null
+            else
+                echo -e "  ${GREEN}✓ zh_CN.UTF-8 locale 已存在，跳过生成。${NC}"
+            fi
+            ;;
+
+        dnf|yum)
+            echo -e "  检测到 RHEL/CentOS/Fedora 系列...${NC}"
+
+            echo -e "\n${BLUE}[3/5] 安装中文 locale 与字体支持...${NC}"
+            # 安装 glibc-langpack-zh 提供 zh_CN.UTF-8
+            $PKG_INSTALL glibc-langpack-zh 2>&1
+            # 安装开源中文字体
+            $PKG_INSTALL google-noto-cjk-fonts 2>/dev/null || \
+                $PKG_INSTALL wqy-zenhei-fonts 2>/dev/null || true
+            echo -e "  locale 安装完毕。"
+            ;;
+
+        apk)
+            echo -e "  检测到 Alpine Linux...${NC}"
+            echo -e "\n${BLUE}[3/5] 正在安装 musl-locales 与字体...${NC}"
+            apk add --no-cache musl-locales musl-locales-lang font-noto-cjk 2>/dev/null || \
+                apk add --no-cache font-noto 2>/dev/null || true
+            ;;
+
+        *)
+            echo -e "${RED}[!] 未能识别当前包管理器，仅执行 locale 环境变量写入。${NC}"
+            ;;
+    esac
+
+    # ---- 5. 全局写入 locale 环境变量 (所有发行版通用) ----
+    echo -e "\n${BLUE}[5/5] 正在将 zh_CN.UTF-8 写入全局环境配置...${NC}"
+
+    # /etc/default/locale (Debian/Ubuntu 标准路径)
+    if [ -d /etc/default ]; then
+        cat > /etc/default/locale <<EOF
+LANG=zh_CN.UTF-8
+LANGUAGE=zh_CN:zh
+LC_ALL=zh_CN.UTF-8
+EOF
+        echo -e "  ${GREEN}✓ 已写入 /etc/default/locale${NC}"
+    fi
+
+    # /etc/environment (跨发行版兼容)
+    if [ -f /etc/environment ]; then
+        sed -i '/^LANG=/d; /^LANGUAGE=/d; /^LC_ALL=/d' /etc/environment
+    fi
+    cat >> /etc/environment <<EOF
+LANG=zh_CN.UTF-8
+LANGUAGE=zh_CN:zh
+LC_ALL=zh_CN.UTF-8
+EOF
+    echo -e "  ${GREEN}✓ 已写入 /etc/environment${NC}"
+
+    # /etc/profile.d/ 方式 (CentOS/Fedora/Alpine 兜底)
+    cat > /etc/profile.d/locale-zh.sh <<EOF
+export LANG=zh_CN.UTF-8
+export LANGUAGE=zh_CN:zh
+export LC_ALL=zh_CN.UTF-8
+export LESSCHARSET=utf-8
+EOF
+    chmod +x /etc/profile.d/locale-zh.sh
+    echo -e "  ${GREEN}✓ 已写入 /etc/profile.d/locale-zh.sh${NC}"
+
+    # 刷新字体缓存 (如果 fc-cache 存在)
+    if command -v fc-cache &>/dev/null; then
+        echo -e "  ⏳ 正在刷新字体缓存...${NC}"
+        fc-cache -fv &>/dev/null
+        echo -e "  ${GREEN}✓ 字体缓存已刷新${NC}"
+    fi
+
+    echo -e "\n${GREEN}=======================================================${NC}"
+    echo -e "${GREEN}✅ 中文字体与 locale 配置修复完成！${NC}"
+    echo -e "${YELLOW}  > 当前会话重载: source /etc/profile.d/locale-zh.sh${NC}"
+    echo -e "${YELLOW}  > 重新 SSH 登录或重启服务器后全面生效。${NC}"
+    echo -e "${GREEN}=======================================================${NC}"
+    read -p "按回车键返回..."
 }
 
 # ========== 网络 IP 配置模块 ==========
