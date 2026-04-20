@@ -226,6 +226,109 @@ _resource_monitoring_view() {
     done
 }
 
+# ================================================================
+# 完整硬件信息总览 (整合自 check_hardware.sh)
+# ================================================================
+_hardware_info_view() {
+    clear
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "${CYAN}              完整硬件信息总览                       ${NC}"
+    echo -e "${CYAN}======================================================${NC}"
+
+    # [1] 系统版本与内核
+    echo -e "\n${GREEN}[1] 系统版本与内核${NC}"
+    echo -e "${CYAN}------------------------------------------------------${NC}"
+    if command -v hostnamectl &>/dev/null; then
+        hostnamectl 2>/dev/null | grep -E "系统|内核|架构|主机|虚拟化|Static|Kernel|Architecture|Virtualization|Operating"
+    else
+        echo -e " 主机名:    $(hostname)"
+        echo -e " 内核版本:  $(uname -r)"
+        echo -e " 系统架构:  $(uname -m)"
+    fi
+
+    # [2] CPU 信息
+    echo -e "\n${GREEN}[2] CPU 信息${NC}"
+    echo -e "${CYAN}------------------------------------------------------${NC}"
+    local cpu_model
+    cpu_model=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
+    [ -z "$cpu_model" ] && cpu_model=$(lscpu 2>/dev/null | grep -E '^Model name|^型号' | head -1 | cut -d: -f2 | xargs)
+    [ -z "$cpu_model" ] && cpu_model="未能识别 (嵌入式/ARM 设备)"
+    local cpu_cores cpu_threads cpu_arch
+    cpu_cores=$(lscpu 2>/dev/null | grep -E '^CPU\(s\)|^Socket' | grep -i 'socket' | awk '{print $2}')
+    cpu_threads=$(grep -c 'processor' /proc/cpuinfo 2>/dev/null)
+    cpu_arch=$(uname -m)
+    echo -e " 型号:      ${YELLOW}${cpu_model}${NC}"
+    echo -e " 逻辑核心:  ${cpu_threads} 线程"
+    echo -e " 架构:      ${cpu_arch}"
+    if command -v lscpu &>/dev/null; then
+        local cpu_freq
+        cpu_freq=$(lscpu 2>/dev/null | grep -E 'MHz|GHz' | grep -i 'max\|cur' | head -2)
+        [ -n "$cpu_freq" ] && echo -e " 频率信息:  $(echo "$cpu_freq" | tr '\n' '|' | sed 's/|$//')" 
+    fi
+
+    # [3] 内存信息
+    echo -e "\n${GREEN}[3] 内存信息 (free -h)${NC}"
+    echo -e "${CYAN}------------------------------------------------------${NC}"
+    free -h
+
+    # [4] 磁盘/存储设备拓扑
+    echo -e "\n${GREEN}[4] 磁盘/存储设备拓扑 (lsblk)${NC}"
+    echo -e "${CYAN}------------------------------------------------------${NC}"
+    if command -v lsblk &>/dev/null; then
+        lsblk -p -o NAME,TYPE,FSTYPE,SIZE,MOUNTPOINT,MODEL 2>/dev/null | grep -v loop
+    else
+        echo -e " ${YELLOW}lsblk 未安装，使用 df 替代:${NC}"
+        df -h | grep -vE 'tmpfs|devtmpfs|overlay|shm'
+    fi
+
+    # [5] 网络设备
+    echo -e "\n${GREEN}[5] 网络设备 (ip addr)${NC}"
+    echo -e "${CYAN}------------------------------------------------------${NC}"
+    ip addr 2>/dev/null | grep -E '^[0-9]+:' | awk -F: '{print NR". "$2}'
+    echo -e " 当前路由出口: ${YELLOW}$(ip route 2>/dev/null | grep default | head -1)${NC}"
+
+    # [6] USB 设备
+    echo -e "\n${GREEN}[6] USB 设备${NC}"
+    echo -e "${CYAN}------------------------------------------------------${NC}"
+    if command -v lsusb &>/dev/null; then
+        lsusb 2>/dev/null || echo " 未检测到 USB 设备"
+    else
+        echo -e " ${YELLOW}lsusb 未安装。可执行: apt install usbutils -y${NC}"
+    fi
+
+    # [7] 系统温度
+    echo -e "\n${GREEN}[7] 系统温度${NC}"
+    echo -e "${CYAN}------------------------------------------------------${NC}"
+    local has_temp=0
+    for zone in /sys/class/thermal/thermal_zone*/temp; do
+        [ -f "$zone" ] || continue
+        local zone_name zone_temp
+        zone_name=$(basename "$(dirname "$zone")")
+        zone_temp=$(cat "$zone" 2>/dev/null)
+        if [ -n "$zone_temp" ]; then
+            echo -e " ${zone_name}: ${YELLOW}$((zone_temp / 1000)) ℃${NC}"
+            has_temp=1
+        fi
+    done
+    [ "$has_temp" -eq 0 ] && echo -e " ${YELLOW}未检测到温度传感器。${NC}"
+
+    # [8] 完整硬件信息 (lshw)
+    echo -e "\n${GREEN}[8] 完整硬件树 (lshw -short)${NC}"
+    echo -e "${CYAN}------------------------------------------------------${NC}"
+    if command -v lshw &>/dev/null; then
+        lshw -short 2>/dev/null
+    else
+        echo -e " ${YELLOW}lshw 未安装。可执行: apt install lshw -y${NC}"
+        echo -e " 当前可用的替代信息："
+        echo -e "   PCI 设备:" ; lspci 2>/dev/null | head -10 || echo "   (lspci 未安装)"
+    fi
+
+    echo -e "\n${CYAN}======================================================${NC}"
+    echo -e "${GREEN}                  硬件信息查看完成                   ${NC}"
+    echo -e "${CYAN}======================================================${NC}"
+    read -p "按回车键返回监控中心..." < /dev/tty
+}
+
 # Nginx 菜单重构
 nginx_menu() {
     while true; do
@@ -238,9 +341,10 @@ nginx_menu() {
         echo " 3. 筛选 Web 相关服务状态 (Nginx/Java/PHP...)"
         echo " 4. 系统内存与磁盘 I/O 实时监控 (TUI)"
         echo " 5. 详细磁盘分区与挂载状态查看"
+        echo " 6. 完整硬件信息总览 (CPU/内存/硬盘/网卡/温度)"
         echo " 0. 返回主菜单"
         echo -e "${GREEN}==============================================${NC}"
-        read -p "请选择操作 [0-5]: " nginx_choice
+        read -p "请选择操作 [0-6]: " nginx_choice
 
         case $nginx_choice in
             1) nginx_config_view ;;
@@ -259,6 +363,7 @@ nginx_menu() {
                 _display_disk_usage
                 read -p "按回车键返回..."
                 ;;
+            6) _hardware_info_view ;;
             0) break ;;
             *) echo -e "${RED}无效输入。${NC}"; sleep 1 ;;
         esac
