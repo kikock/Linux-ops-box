@@ -111,6 +111,74 @@ _draw_menu_header() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
+# ================================================================
+# 工具箱在线更新函数
+# ================================================================
+_update_toolbox() {
+    clear
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "${CYAN}          Linux-ops-box 在线更新程序                  ${NC}"
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "  ⏳ 正在探测最佳下载通道..."
+
+    # 探测 GitHub 直连可用性，自动切换镜像
+    local GH_MIRROR="https://github.com"
+    if command -v curl &>/dev/null; then
+        if ! curl -Is -m 5 "https://github.com/kikock/Linux-ops-box" | head -1 | grep -qE 'HTTP/.*(200|301|302)'; then
+            echo -e "${YELLOW}  ⚠ GitHub 直连受阻，自动切换国内加速镜像...${NC}"
+            GH_MIRROR="https://ghproxy.net/https://github.com"
+        else
+            echo -e "${GREEN}  ✓ GitHub 官方通道顺畅，已启用直连模式。${NC}"
+        fi
+    elif command -v wget &>/dev/null; then
+        if ! wget --spider -q -T 5 "https://github.com/kikock/Linux-ops-box" 2>/dev/null; then
+            echo -e "${YELLOW}  ⚠ GitHub 直连受阻，自动切换国内加速镜像...${NC}"
+            GH_MIRROR="https://ghproxy.net/https://github.com"
+        else
+            echo -e "${GREEN}  ✓ GitHub 官方通道顺畅，已启用直连模式。${NC}"
+        fi
+    else
+        echo -e "${RED}  ✗ 系统缺少 curl 和 wget，无法在线更新！${NC}"
+        echo -e "  请先安装 curl: apt install curl  或  yum install curl"
+        read -p "  按任意键返回菜单..." -n1 < /dev/tty
+        return
+    fi
+
+    local INSTALL_URL="${GH_MIRROR}/kikock/Linux-ops-box/raw/main/install_system.sh"
+    echo -e "  ➜ 下载源: ${CYAN}${INSTALL_URL}${NC}"
+    echo -e "  ⏳ 正在下载最新安装器，请稍候..."
+
+    local TMP_INSTALLER="/tmp/ops_box_updater_$$.sh"
+
+    if command -v curl &>/dev/null; then
+        curl -fsSL -o "${TMP_INSTALLER}" "${INSTALL_URL}"
+    else
+        wget -qO "${TMP_INSTALLER}" "${INSTALL_URL}"
+    fi
+
+    if [ ! -f "${TMP_INSTALLER}" ] || [ ! -s "${TMP_INSTALLER}" ]; then
+        echo -e "${RED}  ✗ 下载失败！请检查网络或稍后重试。${NC}"
+        rm -f "${TMP_INSTALLER}"
+        read -p "  按任意键返回菜单..." -n1 < /dev/tty
+        return
+    fi
+
+    chmod +x "${TMP_INSTALLER}"
+    echo -e "${GREEN}  ✓ 下载完成，正在执行云端更新流程...${NC}"
+    echo -e "${CYAN}======================================================${NC}"
+    # 执行安装器并传入 --update 参数，强制云端覆盖安装
+    bash "${TMP_INSTALLER}" --update
+    local EXIT_CODE=$?
+    rm -f "${TMP_INSTALLER}"
+
+    if [ $EXIT_CODE -eq 0 ]; then
+        echo -e "\n${GREEN}🎉 工具箱已更新至最新版本！建议重新执行 ck_sysinit 加载新版。${NC}"
+    else
+        echo -e "\n${RED}  ✗ 更新过程中遇到错误（退出码: ${EXIT_CODE}），请检查日志。${NC}"
+    fi
+    read -p "  按任意键返回菜单..." -n1 < /dev/tty
+}
+
 # --- MODULE SETUP COMPLETE ---
 # 自动进入 TUI 面板
 _update_live_data
@@ -130,10 +198,11 @@ while true; do
     echo " 5. 防火墙安全管理中心 (UFW/FirewallD)"
     echo " 6. 网络 IP 与网卡诊断 (静态IP/路由)"
     echo " 7. 系统资源与服务监控中心 (进程/Nginx/磁盘/IO)"
+    echo -e "${YELLOW} 8. ⬆  在线更新工具箱 (从 GitHub 拉取最新版本)${NC}"
     echo -e "${RED} 9. 彻底卸载此工具箱 (清理自启动与链接)${NC}"
     echo " 0. 退出工具箱"
     echo -e "${GREEN}==================================================${NC}"
-    read -p "请输入指令编号 [0-7, 9]: " choice < /dev/tty
+    read -p "请输入指令编号 [0-9]: " choice < /dev/tty
 
     case $choice in
         1) update_system_packages ;;
@@ -143,6 +212,7 @@ while true; do
         5) firewall_menu ;;
         6) network_menu ;;
         7) nginx_menu ;;
+        8) _update_toolbox ;;
         9) 
             echo -e "${YELLOW}警告: 即将执行彻底卸载程序...${NC}"
             read -p "是否确认从系统中移除 Linux-ops-box? [y/N]: " confirm
