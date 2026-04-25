@@ -198,8 +198,8 @@ while true; do
     echo " 5. 防火墙安全管理中心 (UFW/FirewallD)"
     echo " 6. 网络 IP 与网卡诊断 (静态IP/路由)"
     echo " 7. 系统资源与服务监控中心 (进程/Nginx/磁盘/IO)"
-    echo -e "${YELLOW} 8. ⬆  在线更新工具箱 (从 GitHub 拉取最新版本)${NC}"
-    echo -e "${RED} 9. 彻底卸载此工具箱 (清理自启动与链接)${NC}"
+    echo -e "${YELLOW} 8. 🎉更新工具箱${NC}"
+    echo -e "${RED} 9. 🎉卸载此工具箱${NC}"
     echo " 0. 退出工具箱"
     echo -e "${GREEN}==================================================${NC}"
     read -p "请输入指令编号 [0-9]: " choice < /dev/tty
