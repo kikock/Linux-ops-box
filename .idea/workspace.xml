@@ -4,10 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="2fd15132-d902-4914-bfb1-624deecd9e32" name="更改" comment="feat: 新增中文乱码一键修复功能到系统环境深度优化菜单 [选项8]">
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/system_init.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/system_init.sh" afterDir="false" />
-    </list>
+    <list default="true" id="2fd15132-d902-4914-bfb1-624deecd9e32" name="更改" comment="更新菜单" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -111,7 +108,7 @@
       <workItem from="1775544171760" duration="11375000" />
       <workItem from="1776332944665" duration="843000" />
       <workItem from="1776406702643" duration="4433000" />
-      <workItem from="1776908233498" duration="3559000" />
+      <workItem from="1776908233498" duration="23092000" />
     </task>
     <task id="LOCAL-00001" summary="更新说明">
       <option name="closed" value="true" />
@@ -169,7 +166,23 @@
       <option name="project" value="LOCAL" />
       <updated>1776908323921</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="Merge remote-tracking branch 'origin/main'">
+      <option name="closed" value="true" />
+      <created>1777024522741</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1777024522741</updated>
+    </task>
+    <task id="LOCAL-00009" summary="更新菜单">
+      <option name="closed" value="true" />
+      <created>1777077493123</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1777077493123</updated>
+    </task>
+    <option name="localTasksCounter" value="10" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -194,7 +207,9 @@
     <MESSAGE value="1" />
     <MESSAGE value="更新" />
     <MESSAGE value="feat: 新增中文乱码一键修复功能到系统环境深度优化菜单 [选项8]" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat: 新增中文乱码一键修复功能到系统环境深度优化菜单 [选项8]" />
+    <MESSAGE value="Merge remote-tracking branch 'origin/main'" />
+    <MESSAGE value="更新菜单" />
+    <option name="LAST_COMMIT_MESSAGE" value="更新菜单" />
     <option name="OPTIMIZE_IMPORTS_BEFORE_PROJECT_COMMIT" value="true" />
   </component>
 </project>

@@ -1,0 +1,32 @@
+[
+  {
+    "alias": "本地MySQL(直连示例)",
+    "type": "mysql",
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "root",
+    "password": "your_password",
+    "mode": "host",
+    "container": ""
+  },
+  {
+    "alias": "Docker-MySQL(示例)",
+    "type": "mysql",
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "root",
+    "password": "your_password",
+    "mode": "docker",
+    "container": "mysql_container_name"
+  },
+  {
+    "alias": "Docker-PostgreSQL(示例)",
+    "type": "postgresql",
+    "host": "127.0.0.1",
+    "port": 5432,
+    "user": "postgres",
+    "password": "your_password",
+    "mode": "docker",
+    "container": "postgres_container_name"
+  }
+]

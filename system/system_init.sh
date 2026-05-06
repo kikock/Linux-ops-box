@@ -42,6 +42,9 @@ fi
 if [ -f "$BASE_DIR/modules/firewall_mgmt.sh" ]; then
     source "$BASE_DIR/modules/firewall_mgmt.sh"
 fi
+if [ -f "$BASE_DIR/modules/db_mgmt_loader.sh" ]; then
+    source "$BASE_DIR/modules/db_mgmt_loader.sh"
+fi
 
 # ================================================================
 # 1. 静态环境参数自检 (只在启动时检索 1 次，缓存以提升性能)
@@ -198,11 +201,12 @@ while true; do
     echo " 5. 防火墙安全管理中心 (UFW/FirewallD)"
     echo " 6. 网络 IP 与网卡诊断 (静态IP/路由)"
     echo " 7. 系统资源与服务监控中心 (进程/Nginx/磁盘/IO)"
-    echo -e "${YELLOW} 8. 🎉更新工具箱${NC}"
-    echo -e "${RED} 9. 🎉卸载此工具箱${NC}"
+    echo " 8. 数据库管理中心 (MySQL/PostgreSQL 备份归档)"
+    echo -e "${YELLOW} 9. 🎉更新工具箱${NC}"
+    echo -e "${RED} 10. 🎉卸载此工具箱${NC}"
     echo " 0. 退出工具箱"
     echo -e "${GREEN}==================================================${NC}"
-    read -p "请输入指令编号 [0-9]: " choice < /dev/tty
+    read -p "请输入指令编号 [0-10]: " choice < /dev/tty
 
     case $choice in
         1) update_system_packages ;;
@@ -212,8 +216,9 @@ while true; do
         5) firewall_menu ;;
         6) network_menu ;;
         7) nginx_menu ;;
-        8) _update_toolbox ;;
-        9) 
+        8) db_management_center ;;
+        9) _update_toolbox ;;
+        10) 
             echo -e "${YELLOW}警告: 即将执行彻底卸载程序...${NC}"
             read -p "是否确认从系统中移除 Linux-ops-box? [y/N]: " confirm
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
