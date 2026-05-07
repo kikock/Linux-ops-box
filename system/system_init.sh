@@ -45,6 +45,9 @@ fi
 if [ -f "$BASE_DIR/modules/db_mgmt_loader.sh" ]; then
     source "$BASE_DIR/modules/db_mgmt_loader.sh"
 fi
+if [ -f "$BASE_DIR/modules/docker_mgmt.sh" ]; then
+    source "$BASE_DIR/modules/docker_mgmt.sh"
+fi
 
 # ================================================================
 # 1. 静态环境参数自检 (只在启动时检索 1 次，缓存以提升性能)
@@ -190,50 +193,52 @@ _update_live_data
 while true; do
     clear
     echo -e "${CYAN}======================================================${NC}"
-    echo -e "${CYAN}      Linux 系统初始化工具箱 v2.0 - By kikock      ${NC}"
+    echo -e "${CYAN}      Linux 系统初始化工具箱 v2.1 - By kikock      ${NC}"
     echo -e "${CYAN}======================================================${NC}"
     _draw_menu_header
-    echo -e "${GREEN}================== 运维指令中心 ==================${NC}"
-    echo " 1. 系统软件包更新 (清理冗余/内核升级)"
-    echo " 2. 系统环境深度优化 (源/BBR/Swap/时区)"
-    echo " 3. 常用专家工具集安装 (最小化系统必备)"
-    echo " 4. SSH 远程安全加固 (证书/端口/防爆破)"
-    echo " 5. 防火墙安全管理中心 (UFW/FirewallD)"
-    echo " 6. 网络 IP 与网卡诊断 (静态IP/路由)"
-    echo " 7. 系统资源与服务监控中心 (进程/Nginx/磁盘/IO)"
-    echo " 8. 数据库管理中心 (MySQL/PostgreSQL 备份归档)"
-    echo -e "${YELLOW} 9. 🎉更新工具箱${NC}"
-    echo -e "${RED} 10. 🎉卸载此工具箱${NC}"
-    echo " 0. 退出工具箱"
-    echo -e "${GREEN}==================================================${NC}"
-    read -p "请输入指令编号 [0-10]: " choice < /dev/tty
+    echo -e "${GREEN}══════════════ 🛠  系统运维中心 ══════════════${NC}"
+    echo " 1. 系统软件包更新       (清理冗余/内核升级)"
+    echo " 2. 系统环境深度优化     (换源/BBR/Swap/时区)"
+    echo " 3. 常用专家工具集安装   (最小化系统必备)"
+    echo " 4. SSH 远程安全加固     (证书/端口/防爆破)"
+    echo " 5. 防火墙安全管理中心   (UFW/FirewallD)"
+    echo " 6. 网络 IP 与网卡诊断   (静态IP/路由/MTR)"
+    echo " 7. 系统资源与服务监控   (进程/Nginx/磁盘/IO)"
+    echo -e "${GREEN}══════════════ 📦  基础服务中心 ══════════════${NC}"
+    echo " 8. 数据库管理中心       (MySQL/PostgreSQL 备份归档)"
+    echo " 9. Docker 管理中心      (安装/服务管理/Compose)"
+    echo -e "${GREEN}══════════════ ⚙   工具箱管理   ══════════════${NC}"
+    echo -e "${YELLOW} 10. ♻  在线更新工具箱${NC}"
+    echo -e "${RED} 11. 🗑  卸载此工具箱${NC}"
+    echo " 0.  退出工具箱"
+    echo -e "${GREEN}==============================================${NC}"
+    read -p "请输入指令编号 [0-11]: " choice < /dev/tty
 
     case $choice in
-        1) update_system_packages ;;
-        2) system_optimization_menu ;;
-        3) install_common_tools ;;
-        4) ssh_menu ;;
-        5) firewall_menu ;;
-        6) network_menu ;;
-        7) nginx_menu ;;
-        8) db_management_center ;;
-        9) _update_toolbox ;;
-        10) 
+        1)  update_system_packages ;;
+        2)  system_optimization_menu ;;
+        3)  install_common_tools ;;
+        4)  ssh_menu ;;
+        5)  firewall_menu ;;
+        6)  network_menu ;;
+        7)  nginx_menu ;;
+        8)  db_management_center ;;
+        9)  docker_management_center ;;
+        10) _update_toolbox ;;
+        11)
             echo -e "${YELLOW}警告: 即将执行彻底卸载程序...${NC}"
             read -p "是否确认从系统中移除 Linux-ops-box? [y/N]: " confirm
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                # 清理软链接
                 rm -f "/usr/local/bin/ck_sysinit" 2>/dev/null
-                rm -f "/usr/local/bin/sysinit" 2>/dev/null
-                # 提示用户手动删除目录 (因为脚本正在从该目录运行，无法自删)
+                rm -f "/usr/local/bin/sysinit"    2>/dev/null
                 echo -e "${GREEN}✅ 全局调令符已清理。${NC}"
-                echo -e "${YELLOW}由于脚本正在运行，请在退出后手动执行以下指令完成最后清理：${NC}"
+                echo -e "${YELLOW}请在退出后手动执行以下指令完成最后清理：${NC}"
                 echo -e "  ${CYAN}rm -rf /opt/ck_sysinit${NC}"
                 echo -e "${BLUE}感谢使用！${NC}"
                 exit 0
             fi
             ;;
         0) echo -e "${BLUE}感谢使用，再见！- kikock${NC}"; exit 0 ;;
-        *) echo -e "${RED}输入无效，请重新选择。${NC}" ; sleep 1 ;;
+        *) echo -e "${RED}输入无效，请重新选择。${NC}"; sleep 1 ;;
     esac
 done

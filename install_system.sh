@@ -166,6 +166,13 @@ for extra_dir in docker nginx static config db_manager; do
         cp -rf "$SRC_DIR/$extra_dir" "$TARGET_OPT/"
     fi
 done
+# 同步根目录独立脚本 (供 docker_mgmt.sh 调用)
+REPO_ROOT="$(dirname "$SRC_DIR")"
+for standalone_script in install_docker.sh install_vpn.sh naive_install.sh; do
+    if [ -f "$REPO_ROOT/$standalone_script" ]; then
+        cp -f "$REPO_ROOT/$standalone_script" "$TARGET_OPT/"
+    fi
+done
 
 # 权限标准化清洗 (针对 Anolis OS/CentOS 8 严格模式)
 echo -e "  ⏳ 正在标准化全局权限协议 [755]..."
