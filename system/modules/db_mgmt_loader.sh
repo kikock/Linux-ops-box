@@ -14,11 +14,10 @@ DB_MGMT_SCRIPT="$DB_MOD_DIR/db_mgmt.sh"
 # 这样 db_mgmt.sh 内部的 SCRIPT_DIR 会指向正确的 modules/db_manager
 export SCRIPT_DIR="$DB_MOD_DIR"
 
-# 2. 预检依赖并 source 核心脚本
+# 2. source 核心脚本 (仅加载函数定义，不执行菜单)
+# db_mgmt.sh 末尾用 BASH_SOURCE 守卫入口，source 时不会触发 main_menu
 if [ -f "$DB_MGMT_SCRIPT" ]; then
-    # 注意：db_mgmt.sh 内部有 main_menu 和 exit 逻辑，我们需要将其作为库引入
-    # 但 db_mgmt.sh 末尾有 case "$1" 判断。我们不传参数 source 它，它会定义函数但不会跑 main_menu
-    source "$DB_MGMT_SCRIPT" ""
+    source "$DB_MGMT_SCRIPT"
 else
     _log_err "数据库管理脚本缺失: $DB_MGMT_SCRIPT"
 fi

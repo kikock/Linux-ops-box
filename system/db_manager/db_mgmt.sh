@@ -1619,18 +1619,22 @@ main_menu() {
     done
 }
 
-# ── 入口判断 ──────────────────────────────────────────────────────
-case "$1" in
-    --cron-backup)
-        check_jq
-        init_config
-        cron_backup_run "$2" "$3"
-        ;;
-    --cron-archive)
-        check_jq
-        cron_archive_run "$2"
-        ;;
-    *)
-        main_menu
-        ;;
-esac
+# ── 入口判断 (仅直接执行时生效，被 source 引入时跳过) ────────────
+# 当被 db_mgmt_loader.sh source 加载时，BASH_SOURCE[0] != $0，
+# 不会触发 main_menu，避免覆盖 ck_sysinit 的主菜单循环。
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    case "$1" in
+        --cron-backup)
+            check_jq
+            init_config
+            cron_backup_run "$2" "$3"
+            ;;
+        --cron-archive)
+            check_jq
+            cron_archive_run "$2"
+            ;;
+        *)
+            main_menu
+            ;;
+    esac
+fi
