@@ -4,7 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="2fd15132-d902-4914-bfb1-624deecd9e32" name="更改" comment="更新菜单" />
+    <list default="true" id="2fd15132-d902-4914-bfb1-624deecd9e32" name="更改" comment="更新菜单">
+      <change beforePath="$PROJECT_DIR$/install_docker.sh" beforeDir="false" afterPath="$PROJECT_DIR$/install_docker.sh" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -109,6 +111,7 @@
       <workItem from="1776332944665" duration="843000" />
       <workItem from="1776406702643" duration="4433000" />
       <workItem from="1776908233498" duration="23092000" />
+      <workItem from="1778037241554" duration="1882000" />
     </task>
     <task id="LOCAL-00001" summary="更新说明">
       <option name="closed" value="true" />

@@ -1,60 +1,38 @@
 #!/bin/bash
 # =================================================================
 # 脚本名称: install_docker.sh
-# 描述: Docker \u0026 Docker Compose 智能管理与安装器 (v2.2)
-# 功能: 版本自适应采集、下载校验、服务管理、一键全自动部署
+# 描述: Docker & Docker Compose 智能管理与安装器 (v2.3)
+# 功能: 版本自适应采集、进度可视化、服务管理、一键全自动部署
 # =================================================================
 
-# 颜色定义
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m'
 
-# 权限检测
 if [[ $EUID -ne 0 ]]; then
    echo -e "${RED}错误: 该工具需要 root 权限，请使用 sudo 执行。${NC}"
    exit 1
 fi
 
-# 基础环境变量环境探测
 ARCH=$(uname -m)
 case "$ARCH" in
-    x86_64)
-        DOCKER_ARCH="x86_64"
-        COMPOSE_ARCH="x86_64"
-        ;;
-    aarch64|arm64)
-        DOCKER_ARCH="aarch64"
-        COMPOSE_ARCH="aarch64"
-        ;;
-    armv7l|armv7)
-        DOCKER_ARCH="armhf"
-        COMPOSE_ARCH="armv7"
-        ;;
-    armv6l|armv6)
-        DOCKER_ARCH="armel"
-        COMPOSE_ARCH="armv6"
-        ;;
-    ppc64le)
-        DOCKER_ARCH="ppc64le"
-        COMPOSE_ARCH="ppc64le"
-        ;;
-    s390x)
-        DOCKER_ARCH="s390x"
-        COMPOSE_ARCH="s390x"
-        ;;
+    x86_64)          DOCKER_ARCH="x86_64";  COMPOSE_ARCH="x86_64" ;;
+    aarch64|arm64)   DOCKER_ARCH="aarch64"; COMPOSE_ARCH="aarch64" ;;
+    armv7l|armv7)    DOCKER_ARCH="armhf";   COMPOSE_ARCH="armv7" ;;
+    armv6l|armv6)    DOCKER_ARCH="armel";   COMPOSE_ARCH="armv6" ;;
+    ppc64le)         DOCKER_ARCH="ppc64le"; COMPOSE_ARCH="ppc64le" ;;
+    s390x)           DOCKER_ARCH="s390x";   COMPOSE_ARCH="s390x" ;;
     *)
-        echo -e "${RED}警告: 未知/非常规架构 $ARCH，默认使用 x86_64。${NC}"
-        DOCKER_ARCH="x86_64"
-        COMPOSE_ARCH="x86_64"
-        ;;
+        echo -e "${YELLOW}警告: 未知架构 $ARCH，默认使用 x86_64。${NC}"
+        DOCKER_ARCH="x86_64"; COMPOSE_ARCH="x86_64" ;;
 esac
 
 # ================================================================
-# 私有辅助函数: 网络探测与镜像分配
+# 辅助函数
 # ================================================================
 _get_gh_mirror() {
     if curl -Is -m 3 "https://github.com" | head -1 | grep -qE 'HTTP/.*(200|301|302)'; then
@@ -64,112 +42,172 @@ _get_gh_mirror() {
     fi
 }
 
-# 镜像源自动探测 (源自 install_cloudwaf.sh)
 _check_docker_mirrors() {
-    echo -e "${CYAN}⏳ 正在选择最快的 Docker 下载源...${NC}"
-    local ser_names=("mirrors.ustc.edu.cn/docker-ce" "mirrors.tuna.tsinghua.edu.cn/docker-ce" "mirrors.aliyun.com/docker-ce" "mirror.azure.cn/docker-ce" "download.docker.com")
-    local tmp_file1="/dev/shm/dock_test1.pl"
-    local tmp_file2="/dev/shm/dock_test2.pl"
-    rm -f $tmp_file1 $tmp_file2
-    touch $tmp_file1 $tmp_file2
-
-    for ser_name in "${ser_names[@]}"; do
-        local check=$(curl -k -s -m 5 -w "%{http_code} %{time_total}" "https://${ser_name}" -o /dev/null)
-        local status=$(echo $check | awk '{print $1}')
-        local rtt=$(echo $check | awk '{print $2*1000}' | cut -d. -f1)
-        
-        if [[ "$status" =~ ^(200|301|403)$ ]]; then
-            if [ $rtt -lt 200 ]; then
-                echo "$ser_name" >> $tmp_file1
-            else
-                echo "$rtt $ser_name" >> $tmp_file2
-            fi
+    echo -e "${CYAN}>> 正在选择最快的 Docker 下载源...${NC}"
+    local names=("mirrors.ustc.edu.cn/docker-ce" "mirrors.tuna.tsinghua.edu.cn/docker-ce" \
+                 "mirrors.aliyun.com/docker-ce" "mirror.azure.cn/docker-ce" "download.docker.com")
+    local t1="/dev/shm/dk1.pl" t2="/dev/shm/dk2.pl"
+    rm -f $t1 $t2; touch $t1 $t2
+    for s in "${names[@]}"; do
+        local chk=$(curl -k -s -m 5 -w "%{http_code} %{time_total}" "https://${s}" -o /dev/null)
+        local st=$(echo $chk | awk '{print $1}')
+        local rtt=$(echo $chk | awk '{print $2*1000}' | cut -d. -f1)
+        if [[ "$st" =~ ^(200|301|403)$ ]]; then
+            [[ $rtt -lt 200 ]] && echo "$s" >> $t1 || echo "$rtt $s" >> $t2
         fi
     done
-
-    local best_node=$(head -n 1 $tmp_file1)
-    [[ -z "$best_node" ]] && best_node=$(sort -n $tmp_file2 | head -n 1 | awk '{print $2}')
-    [[ -z "$best_node" ]] && best_node="download.docker.com"
-
-    rm -f $tmp_file1 $tmp_file2
-    
-    case "$best_node" in
-        *aliyun.com*)   DOCKER_BASE_URL="https://mirrors.aliyun.com/docker-ce" ;;
-        *azure.cn*)     DOCKER_BASE_URL="https://mirror.azure.cn/docker-ce" ;;
-        *ustc.edu.cn*)  DOCKER_BASE_URL="https://mirrors.ustc.edu.cn/docker-ce" ;;
-        *tsinghua.edu.cn*) DOCKER_BASE_URL="https://mirrors.tuna.tsinghua.edu.cn/docker-ce" ;;
-        *)              DOCKER_BASE_URL="https://download.docker.com" ;;
+    local best=$(head -n1 $t1)
+    [[ -z "$best" ]] && best=$(sort -n $t2 | head -n1 | awk '{print $2}')
+    [[ -z "$best" ]] && best="download.docker.com"
+    rm -f $t1 $t2
+    case "$best" in
+        *aliyun*)      DOCKER_BASE_URL="https://mirrors.aliyun.com/docker-ce" ;;
+        *azure.cn*)    DOCKER_BASE_URL="https://mirror.azure.cn/docker-ce" ;;
+        *ustc*)        DOCKER_BASE_URL="https://mirrors.ustc.edu.cn/docker-ce" ;;
+        *tsinghua*)    DOCKER_BASE_URL="https://mirrors.tuna.tsinghua.edu.cn/docker-ce" ;;
+        *)             DOCKER_BASE_URL="https://download.docker.com" ;;
     esac
-    echo -e " ✅ 已选择源: ${GREEN}${DOCKER_BASE_URL}${NC}"
+    echo -e "   ${GREEN}[OK]${NC} 已选源: ${GREEN}${DOCKER_BASE_URL}${NC}"
 }
 
 _get_dist_info() {
     if [ -r /etc/os-release ]; then
-        LSB_DIST=$(. /etc/os-release && echo "$ID")
-        LSB_DIST=$(echo "$LSB_DIST" | tr '[:upper:]' '[:lower:]')
+        LSB_DIST=$(. /etc/os-release && echo "$ID" | tr '[:upper:]' '[:lower:]')
         DIST_VERSION=$(. /etc/os-release && echo "$VERSION_ID")
         DIST_CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
     fi
 }
 
+# 带标题进度条的 curl 下载封装
+# 用法: _curl_dl "标题" "URL" "目标路径"
+_curl_dl() {
+    local label="$1" url="$2" dest="$3"
+    echo ""
+    echo -e "${BOLD}${CYAN}  +----------------------------------------------------------+${NC}"
+    printf  "${BOLD}${CYAN}  |  %-56s|${NC}\n" "正在下载: $label"
+    echo -e "${BOLD}${CYAN}  +----------------------------------------------------------+${NC}"
+    echo -e "  ${YELLOW}来源:${NC} $url"
+    echo ""
+    if curl -L -f --progress-bar --stderr - -o "$dest" "$url"; then
+        echo ""
+        echo -e "  ${GREEN}[完成]${NC} $label  下载成功 ✓"
+    else
+        echo ""
+        echo -e "  ${RED}[失败]${NC} $label  下载失败，请检查网络或版本号"
+        return 1
+    fi
+}
+
+# 安装完成命令速查表
+_print_cheatsheet() {
+    local dv="${1:-未知}" cv="${2:-未知}"
+    echo ""
+    echo -e "${GREEN}+======================================================+${NC}"
+    echo -e "${GREEN}|           [OK]  Docker 部署完成！                   |${NC}"
+    echo -e "${GREEN}+------------------------------------------------------+${NC}"
+    printf  "${GREEN}|  Engine : %-42s|${NC}\n" "$dv"
+    printf  "${GREEN}|  Compose: %-42s|${NC}\n" "$cv"
+    echo -e "${GREEN}+======================================================+${NC}"
+    echo ""
+    echo -e "${CYAN}+=================== Docker & Compose 常用命令速查 ===================+${NC}"
+    echo -e "${YELLOW}  [ 服务管理 ]${NC}"
+    echo    "   systemctl start   docker        # 启动 Docker 服务"
+    echo    "   systemctl stop    docker        # 停止 Docker 服务"
+    echo    "   systemctl restart docker        # 重启 Docker 服务"
+    echo    "   systemctl status  docker        # 查看服务运行状态"
+    echo    "   systemctl enable  docker        # 设置开机自启"
+    echo ""
+    echo -e "${YELLOW}  [ 镜像管理 ]${NC}"
+    echo    "   docker pull  <image>            # 拉取镜像"
+    echo    "   docker images                   # 列出本地镜像"
+    echo    "   docker rmi   <image>            # 删除镜像"
+    echo    "   docker save  <image> -o f.tar   # 导出镜像到文件"
+    echo    "   docker load  -i f.tar           # 从文件导入镜像"
+    echo ""
+    echo -e "${YELLOW}  [ 容器管理 ]${NC}"
+    echo    "   docker run -d -p 80:80 <image>  # 后台运行容器并映射端口"
+    echo    "   docker ps                        # 查看运行中的容器"
+    echo    "   docker ps -a                     # 查看所有容器（含已停止）"
+    echo    "   docker exec -it <id> /bin/bash   # 进入运行中的容器"
+    echo    "   docker logs -f <id>              # 实时跟踪容器日志"
+    echo    "   docker inspect <id>              # 查看容器详细信息"
+    echo    "   docker stop  <id>                # 停止容器"
+    echo    "   docker rm    <id>                # 删除已停止的容器"
+    echo    "   docker rm -f <id>                # 强制删除运行中的容器"
+    echo ""
+    echo -e "${YELLOW}  [ Compose 编排 ]${NC}"
+    echo    "   docker compose up -d             # 后台启动所有服务"
+    echo    "   docker compose down              # 停止并移除容器/网络"
+    echo    "   docker compose down -v           # 同上并删除数据卷"
+    echo    "   docker compose restart           # 重启所有服务"
+    echo    "   docker compose logs -f           # 实时查看编排日志"
+    echo    "   docker compose ps                # 查看服务状态"
+    echo    "   docker compose pull              # 更新所有服务镜像"
+    echo    "   docker compose exec <svc> sh     # 进入指定服务容器"
+    echo    "   docker-compose <cmd>             # 兼容旧版 v1 命令"
+    echo ""
+    echo -e "${YELLOW}  [ 系统清理 ]${NC}"
+    echo    "   docker system df                 # 查看磁盘占用"
+    echo    "   docker system prune -af          # 清理所有未使用资源"
+    echo    "   docker volume prune              # 清理未挂载数据卷"
+    echo    "   docker image  prune -af          # 清理悬空镜像"
+    echo -e "${CYAN}+=====================================================================+${NC}"
+    echo ""
+    read -p "  安装已就绪，按回车返回菜单..." < /dev/tty
+}
+
 # ================================================================
-# 1. 检测 Docker 当前安装状态与配置
+# 1. 检查 Docker 状态与配置
 # ================================================================
 check_docker_status() {
     clear
-    echo -e "${CYAN}================ Docker 运行状态与配置详情 ================${NC}"
-    
-    # 检测 Docker 核心引擎
+    echo -e "${CYAN}+================ Docker 运行状态与配置详情 ================+${NC}"
     if command -v docker &>/dev/null; then
-        local D_VER=$(docker -v)
-        local D_STATUS=$(systemctl is-active docker 2>/dev/null || echo "未启动")
-        echo -e " 📦 ${GREEN}Docker 引擎:${NC}  已安装 ($D_VER)"
-        echo -e " 🚀 ${GREEN}运行状态:${NC}    $D_STATUS"
+        local dv=$(docker -v)
+        local ds=$(systemctl is-active docker 2>/dev/null || echo "未启动")
+        echo -e "  Docker 引擎:  ${GREEN}已安装${NC} ($dv)"
+        echo -e "  运行状态:     ${GREEN}$ds${NC}"
     else
-        echo -e " 📦 ${RED}Docker 引擎:${NC}  未安装"
+        echo -e "  Docker 引擎:  ${RED}未安装${NC}"
     fi
-
-    # 检测 Docker Compose 
     if command -v docker-compose &>/dev/null; then
-        echo -e " 🛠  ${GREEN}Compose 状态:${NC} 已就绪 ($(docker-compose -v | head -1))"
-    elif docker compose version &>/dev/null; then
-        echo -e " 🛠  ${GREEN}Compose 状态:${NC} 已就绪 (Docker V2 Plugin)"
+        echo -e "  Compose 状态: ${GREEN}已就绪${NC} ($(docker-compose -v | head -1))"
+    elif docker compose version &>/dev/null 2>&1; then
+        echo -e "  Compose 状态: ${GREEN}已就绪${NC} (Docker V2 Plugin)"
     else
-        echo -e " 🛠  ${RED}Compose 状态:${NC} 未检测到二进制文件"
+        echo -e "  Compose 状态: ${RED}未检测到${NC}"
     fi
-
-    # 读取镜像加速器配置
     if [ -f /etc/docker/daemon.json ]; then
-        echo -e "\n ${YELLOW}--- 镜像加速器配置 (/etc/docker/daemon.json) ---${NC}"
+        echo -e "\n  ${YELLOW}--- /etc/docker/daemon.json ---${NC}"
         cat /etc/docker/daemon.json
     fi
-    
-    echo -e "\n${CYAN}=========================================================${NC}"
+    echo -e "${CYAN}+===========================================================+${NC}"
     read -p "按回车键返回菜单..." < /dev/tty
 }
 
 # ================================================================
-# 2. Docker 服务管理 (启动/停止/重启/自启控制)
+# 2. Docker 服务管理
 # ================================================================
 manage_docker_service() {
     while true; do
         clear
-        local STATUS=$(systemctl is-active docker 2>/dev/null || echo "未安装或未启动")
-        echo -e "${BLUE}================ Docker 管理指令集 (服务级) ================${NC}"
-        echo -e " 当前 Docker 状态: ${YELLOW}$STATUS${NC}"
-        echo " 1. 启动 Docker"
-        echo " 2. 停止 Docker"
-        echo " 3. 重启 Docker"
-        echo " 4. 启用 开机自启"
-        echo " 5. 禁用 开机自启"
-        echo " 0. 返回上级"
-        echo -e "${BLUE}=========================================================${NC}"
-        read -p "选择指令 [0-5]: " cmd_choice < /dev/tty
-        case $cmd_choice in
-            1) systemctl start docker && echo -e "${GREEN}启动指令已发出。${NC}" ;;
-            2) systemctl stop docker && echo -e "${YELLOW}停止指令已发出。${NC}" ;;
-            3) systemctl restart docker && echo -e "${GREEN}重启指令已发出。${NC}" ;;
-            4) systemctl enable docker && echo -e "${GREEN}开机自启已设置。${NC}" ;;
+        local st=$(systemctl is-active docker 2>/dev/null || echo "未安装/未启动")
+        echo -e "${BLUE}+================ Docker 服务指令管理 ================+${NC}"
+        echo -e "  当前状态: ${YELLOW}$st${NC}"
+        echo -e "${BLUE}+-----------------------------------------------------+${NC}"
+        echo "  1. 启动 Docker"
+        echo "  2. 停止 Docker"
+        echo "  3. 重启 Docker"
+        echo "  4. 启用开机自启"
+        echo "  5. 禁用开机自启"
+        echo "  0. 返回上级"
+        echo -e "${BLUE}+=====================================================+${NC}"
+        read -p "选择指令 [0-5]: " c < /dev/tty
+        case $c in
+            1) systemctl start   docker && echo -e "${GREEN}启动成功。${NC}" ;;
+            2) systemctl stop    docker && echo -e "${YELLOW}已停止。${NC}" ;;
+            3) systemctl restart docker && echo -e "${GREEN}重启成功。${NC}" ;;
+            4) systemctl enable  docker && echo -e "${GREEN}开机自启已启用。${NC}" ;;
             5) systemctl disable docker && echo -e "${YELLOW}开机自启已禁用。${NC}" ;;
             0) break ;;
         esac
@@ -178,132 +216,132 @@ manage_docker_service() {
 }
 
 # ================================================================
-# 3. 核心安装逻辑 (含版本抓取与下载校验)
+# 3. 安装模式选择
 # ================================================================
 perform_install() {
     clear
     _get_dist_info
     _check_docker_mirrors
-    
-    echo -e "\n${BLUE}================ 安装模式选择 ================${NC}"
-    echo " 1. [推荐] 软件包模式 (使用 Repo 自动管理依赖)"
-    echo " 2. [兼容] 静态编译模式 (解压即用，适合全发行版)"
-    echo -e "${BLUE}==============================================${NC}"
-    read -p "请选择安装模式 [1-2, 默认1]: " install_mode < /dev/tty
-    install_mode=${install_mode:-1}
-
-    if [ "$install_mode" == "1" ]; then
-        install_via_repo
-    else
-        install_via_binary
-    fi
+    echo ""
+    echo -e "${BLUE}+================ 安装模式选择 ================+${NC}"
+    echo "  1. [推荐] 软件包模式  (Repo 自动管理依赖)"
+    echo "  2. [兼容] 静态编译模式 (解压即用，适合全发行版)"
+    echo -e "${BLUE}+===============================================+${NC}"
+    read -p "请选择 [1-2, 默认2]: " mode < /dev/tty
+    mode=${mode:-2}
+    [ "$mode" == "1" ] && install_via_repo || install_via_binary
 }
 
+# ================================================================
+# 3a. 软件包模式
+# ================================================================
 install_via_repo() {
-    echo -e "\n${CYAN}🚀 开始通过软件源安装 Docker...${NC}"
+    echo -e "\n${CYAN}>> 软件包模式安装 Docker...${NC}"
     case "$LSB_DIST" in
         ubuntu|debian|raspbian)
-            apt-get update
+            apt-get update -qq
             apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
             mkdir -p /etc/apt/keyrings
             curl -fsSL "${DOCKER_BASE_URL}/linux/${LSB_DIST}/gpg" | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
             echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] ${DOCKER_BASE_URL}/linux/${LSB_DIST} ${DIST_CODENAME:-$DIST_VERSION} stable" > /etc/apt/sources.list.d/docker.list
-            apt-get update
+            apt-get update -qq
             apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
             ;;
         centos|rhel|ol|tencentos|alinux|anolis|rocky|almalinux|opencloudos|openeuler|hce|uos|amzn)
             yum install -y yum-utils
-            local repo_dist=$LSB_DIST
-            [[ "$LSB_DIST" =~ ^(ol|tencentos|alinux|anolis|opencloudos|openeuler|hce|uos|amzn|rocky|almalinux)$ ]] && repo_dist="centos"
-            
-            yum-config-manager --add-repo "${DOCKER_BASE_URL}/linux/${repo_dist}/docker-ce.repo"
+            local rd=$LSB_DIST
+            [[ "$LSB_DIST" =~ ^(ol|tencentos|alinux|anolis|opencloudos|openeuler|hce|uos|amzn|rocky|almalinux)$ ]] && rd="centos"
+            yum-config-manager --add-repo "${DOCKER_BASE_URL}/linux/${rd}/docker-ce.repo"
             sed -i "s|https://download.docker.com|${DOCKER_BASE_URL}|g" /etc/yum.repos.d/docker-ce.repo
-            
-            # 针对特殊系统的版本修正
-            if [ "$LSB_DIST" = "openeuler" ] || [ "$LSB_DIST" = "hce" ] || [ "$LSB_DIST" = "opencloudos" ] || [ "$LSB_DIST" = "amzn" ]; then
-                 sed -i "s|\$releasever|8|g" /etc/yum.repos.d/docker-ce.repo
-            fi
-
-            local conflicting=""
-            [[ $(cat /etc/os-release | grep "NAME") =~ (Stream|Rocky|AlmaLinux|EulerOS) ]] && conflicting="--allowerasing"
-            
-            yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin $conflicting
+            yum install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
             ;;
         *)
-            echo -e "${RED}❌ 暂不支持该发行版的 Repo 自动安装，尝试转回静态编译模式...${NC}"
-            sleep 2
-            install_via_binary
-            return
-            ;;
+            echo -e "${RED}不支持的发行版: $LSB_DIST，请使用静态编译模式。${NC}"
+            return 1 ;;
     esac
-    
+    systemctl daemon-reload
     systemctl enable --now docker
-    echo -e "\n${GREEN}🎉 Repo 部署完成!${NC}"
-    docker -v
-    docker compose version
-    read -p "按回车返回菜单..." < /dev/tty
+    local dv=$(docker -v 2>/dev/null || echo "读取失败")
+    local cv="Plugin"
+    docker compose version &>/dev/null 2>&1 && cv=$(docker compose version --short 2>/dev/null)
+    _print_cheatsheet "$dv" "docker compose $cv (plugin)"
 }
 
+# ================================================================
+# 3b. 静态编译模式（进度优化版）
+# ================================================================
 install_via_binary() {
-    echo -e "${CYAN}--- 自动化版本检索机制启动 ---${NC}"
-    
+    clear
+    echo -e "${CYAN}+======================================================+${NC}"
+    echo -e "${CYAN}|     静态编译模式 — 自动化版本检索与部署             |${NC}"
+    echo -e "${CYAN}+======================================================+${NC}"
+
     local MIRROR=$(_get_gh_mirror)
-    echo -e "  🌐 GitHub 代理线路: ${MIRROR}"
+    echo -e "  GitHub 代理: ${GREEN}${MIRROR}${NC}"
 
-    # 如果 DOCKER_BASE_URL 指向国内镜像，则从镜像站抓取，否则用官网
     local STATIC_URL="https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/"
-    if [[ "$DOCKER_BASE_URL" != *"download.docker.com"* ]]; then
+    [[ "$DOCKER_BASE_URL" != *"download.docker.com"* ]] && \
         STATIC_URL="${DOCKER_BASE_URL}/linux/static/stable/${DOCKER_ARCH}/"
-    fi
 
-    echo -e "  ⏳ 正在采集 Docker 官方静态离线源列表..."
-    local RAW_D_TAGS=$(curl -sL --connect-timeout 5 "$STATIC_URL" | grep -oE 'docker-[0-9]+\.[0-9]+\.[0-9]+\.tgz' | sed 's/docker-//;s/\.tgz//' | sort -uV | tail -n 8)
-    
-    IFS=$'\n' read -rd '' -a D_VERSIONS <<<"$RAW_D_TAGS"
-    if [ ${#D_VERSIONS[@]} -eq 0 ]; then
-        echo -e "${YELLOW}⚠ 无法动态解析官网版本，启用默认推荐版${NC}"
-        D_VERSIONS=("24.0.9" "25.0.3" "26.1.3" "27.0.3")
-    fi
+    echo -e "\n  >> 采集 Docker Engine 版本列表..."
+    local RAW_D=$(curl -sL --connect-timeout 8 "$STATIC_URL" | \
+        grep -oE 'docker-[0-9]+\.[0-9]+\.[0-9]+\.tgz' | \
+        sed 's/docker-//;s/\.tgz//' | sort -uV | tail -n 8)
+    IFS=$'\n' read -rd '' -a D_VERS <<< "$RAW_D"
+    [ ${#D_VERS[@]} -eq 0 ] && D_VERS=("24.0.9" "25.0.3" "26.1.3" "27.0.3") && \
+        echo -e "  ${YELLOW}>> 使用内置推荐版本${NC}"
 
-    echo -e "  ⏳ 正在采集 Docker Compose 发布记录..."
-    local RAW_C_TAGS=$(curl -sL --connect-timeout 5 "${MIRROR}/docker/compose/releases" | grep -oE 'v2\.[0-9]+\.[0-9]+' | sort -ur | head -n 6)
-    IFS=$'\n' read -rd '' -a C_VERSIONS <<<"$RAW_C_TAGS"
-    
-    if [ ${#C_VERSIONS[@]} -eq 0 ]; then
-        C_VERSIONS=("v2.26.1" "v2.27.0" "v2.28.1")
-    fi
+    echo -e "  >> 采集 Docker Compose 版本列表..."
+    local RAW_C=$(curl -sL --connect-timeout 8 "${MIRROR}/docker/compose/releases" | \
+        grep -oE 'v2\.[0-9]+\.[0-9]+' | sort -ur | head -n 6)
+    IFS=$'\n' read -rd '' -a C_VERS <<< "$RAW_C"
+    [ ${#C_VERS[@]} -eq 0 ] && C_VERS=("v2.26.1" "v2.27.0" "v2.28.1")
 
-    local DEFAULT_D="${D_VERSIONS[-1]}"
-    local DEFAULT_C="${C_VERSIONS[0]}"
+    local DEF_D="${D_VERS[-1]}" DEF_C="${C_VERS[0]}"
+    echo ""
+    echo -e "  可用 Engine 版本:  ${YELLOW}${D_VERS[*]}${NC}"
+    read -p "  Docker Engine 版本 [默认 $DEF_D]: " CHOSEN_D < /dev/tty
+    CHOSEN_D=${CHOSEN_D:-$DEF_D}
 
-    read -p "请输入 Docker 版本 (默认 $DEFAULT_D): " CHOSEN_D < /dev/tty
-    CHOSEN_D=${CHOSEN_D:-$DEFAULT_D}
-    read -p "请输入 Compose 版本 (默认 $DEFAULT_C): " CHOSEN_C < /dev/tty
-    CHOSEN_C=${CHOSEN_C:-$DEFAULT_C}
+    echo ""
+    echo -e "  可用 Compose 版本: ${YELLOW}${C_VERS[*]}${NC}"
+    read -p "  Docker Compose 版本 [默认 $DEF_C]: " CHOSEN_C < /dev/tty
+    CHOSEN_C=${CHOSEN_C:-$DEF_C}
 
-    echo -e "\n🚀 ${GREEN}任务开始: 安装 Docker $CHOSEN_D & Compose $CHOSEN_C${NC}"
+    echo ""
+    echo -e "${CYAN}+======================================================+${NC}"
+    echo -e "${CYAN}|             部署计划确认                             |${NC}"
+    echo -e "${CYAN}+------------------------------------------------------+${NC}"
+    printf  "${CYAN}|  Docker Engine : ${GREEN}%-36s${CYAN}|${NC}\n" "$CHOSEN_D"
+    printf  "${CYAN}|  Docker Compose: ${GREEN}%-36s${CYAN}|${NC}\n" "$CHOSEN_C"
+    printf  "${CYAN}|  目标架构      : ${GREEN}%-36s${CYAN}|${NC}\n" "$DOCKER_ARCH"
+    echo -e "${CYAN}+======================================================+${NC}"
+    echo ""
 
-    local D_DL_URL="${STATIC_URL}docker-${CHOSEN_D}.tgz"
-    local C_DL_URL="${MIRROR}/docker/compose/releases/download/${CHOSEN_C}/docker-compose-linux-${COMPOSE_ARCH}"
+    local D_URL="${STATIC_URL}docker-${CHOSEN_D}.tgz"
+    local C_URL="${MIRROR}/docker/compose/releases/download/${CHOSEN_C}/docker-compose-linux-${COMPOSE_ARCH}"
 
-    rm -f /tmp/docker_bin.tgz /tmp/docker -rf
-    if ! curl -L -f -# -o /tmp/docker_bin.tgz "$D_DL_URL"; then
-        echo -e "${RED}❌ 下载失败，请检查网络或版本号。${NC}"
-        return 1
-    fi
-    
-    if ! curl -L -f -# -o /usr/local/bin/docker-compose "$C_DL_URL"; then
-         echo -e "${RED}❌ Compose 下载失败。${NC}"
-         return 1
-    fi
+    # [1/4] 下载 Docker Engine
+    echo -e "${GREEN}[1/4]${NC} 下载 Docker Engine  ${YELLOW}${CHOSEN_D}${NC}"
+    rm -rf /tmp/docker_bin.tgz /tmp/docker
+    _curl_dl "Docker Engine v${CHOSEN_D} (${DOCKER_ARCH})" "$D_URL" "/tmp/docker_bin.tgz" || return 1
 
+    # [2/4] 下载 Docker Compose
+    echo ""
+    echo -e "${GREEN}[2/4]${NC} 下载 Docker Compose ${YELLOW}${CHOSEN_C}${NC}"
+    _curl_dl "Docker Compose ${CHOSEN_C} (${COMPOSE_ARCH})" "$C_URL" "/usr/local/bin/docker-compose" || return 1
+
+    # [3/4] 解压部署
+    echo ""
+    echo -e "${GREEN}[3/4]${NC} 解压并部署二进制文件..."
     tar -xzf /tmp/docker_bin.tgz -C /tmp/
     cp -f /tmp/docker/* /usr/bin/
     chmod +x /usr/local/bin/docker-compose
     ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+    echo -e "  ${GREEN}[OK]${NC} 二进制文件已部署至 /usr/bin/"
 
     if [ ! -f /etc/systemd/system/docker.service ]; then
-        cat > /etc/systemd/system/docker.service << 'EOF'
+        cat > /etc/systemd/system/docker.service << 'SVCEOF'
 [Unit]
 Description=Docker Application Container Engine
 After=network-online.target firewalld.service
@@ -325,81 +363,80 @@ StartLimitInterval=60s
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SVCEOF
+        echo -e "  ${GREEN}[OK]${NC} systemd 服务单元已写入"
     fi
 
+    # [4/4] 启动服务
+    echo ""
+    echo -e "${GREEN}[4/4]${NC} 启动并注册 Docker 服务..."
     systemctl daemon-reload
     systemctl enable --now docker
-    
-    echo -e "\n${GREEN}🎉 静态部署完成!${NC}"
-    docker -v
-    docker-compose -v
-    read -p "安装工作已就绪，按回车返回菜单..." < /dev/tty
+    sleep 2
+    echo -e "  ${GREEN}[OK]${NC} Docker 服务已启动"
+
+    local DV=$(docker -v 2>/dev/null || echo "读取失败")
+    local CV=$(docker-compose -v 2>/dev/null | head -1 || echo "读取失败")
+    _print_cheatsheet "$DV" "$CV"
 }
 
 # ================================================================
-# 4. 彻底卸载 Docker 及其组件
+# 4. 彻底卸载
 # ================================================================
 perform_uninstall() {
     clear
-    echo -e "${RED}==================== 危险: 彻底卸载 Docker ====================${NC}"
-    echo -e " 该操作将停止所有正运行容器，并清除所有二进制程序与配置文件。"
-    read -p " 是否确认彻底清除系统中的 Docker? (y/N): " confirm_un < /dev/tty
-    if [[ "$confirm_un" =~ ^[Yy]$ ]]; then
-        echo -e "${YELLOW} [1/3] 停止并禁用 Docker 服务层...${NC}"
-        systemctl stop docker 2>/dev/null
+    echo -e "${RED}+=============== 危险: 彻底卸载 Docker ===============+${NC}"
+    echo -e "  此操作将停止所有容器并清除所有 Docker 相关文件。"
+    read -p "  确认彻底卸载? (y/N): " yn < /dev/tty
+    if [[ "$yn" =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}  [1/3] 停止并禁用服务...${NC}"
+        systemctl stop    docker 2>/dev/null
         systemctl disable docker 2>/dev/null
-        
-        echo -e "${YELLOW} [2/3] 清除核心二进制文件与快捷方式...${NC}"
+        echo -e "${YELLOW}  [2/3] 清除二进制文件...${NC}"
         rm -f /usr/bin/docker* /usr/bin/containerd* /usr/bin/runc /usr/bin/ctr
         rm -f /usr/local/bin/docker-compose /usr/bin/docker-compose
         rm -f /etc/systemd/system/docker.service
-        
-        echo -e "${YELLOW} [3/3] 重刷系统总线配置...${NC}"
+        echo -e "${YELLOW}  [3/3] 重刷 systemd 配置...${NC}"
         systemctl daemon-reload
-        echo -e "${GREEN} 卸载任务圆满终止。${NC}"
+        echo -e "${GREEN}  [OK] 卸载完成。${NC}"
     else
-        echo -e " 已取消操作。"
+        echo -e "  已取消。"
     fi
     read -p "按回车键返回菜单..." < /dev/tty
 }
 
 # ================================================================
-# 0. 主逻辑循环 (TUI 结构)
+# 主循环 (TUI)
 # ================================================================
 while true; do
-    # 实时简易检测，用于主菜单展示
-    D_VER_SHORT="未安装"
-    if command -v docker &>/dev/null; then
-        D_VER_SHORT=$(docker -v | awk '{print $3}' | tr -d ',')
-    fi
-    C_VER_SHORT="未安装"
+    D_SHORT="未安装"
+    command -v docker &>/dev/null && D_SHORT=$(docker -v | awk '{print $3}' | tr -d ',')
+    C_SHORT="未安装"
     if command -v docker-compose &>/dev/null; then
-        C_VER_SHORT="已就绪"
-    elif docker compose version &>/dev/null; then
-        C_VER_SHORT="V2(Plugin)"
+        C_SHORT="已就绪"
+    elif docker compose version &>/dev/null 2>&1; then
+        C_SHORT="V2(Plugin)"
     fi
 
     clear
-    echo -e "${GREEN}======================================================${NC}"
-    echo -e "${GREEN}       Docker \u0026 Compose 管理中心 (ck_sysinit)         ${NC}"
-    echo -e "${GREEN}======================================================${NC}"
-    echo -e " ⚓️ 引擎状态: ${YELLOW}$D_VER_SHORT${NC}  |  编排工具: ${YELLOW}$C_VER_SHORT${NC}"
-    echo -e "${GREEN}------------------------------------------------------${NC}"
-    echo " 1. 查看监控/详细配置 (daemon.json)"
-    echo " 2. Docker 服务指令管理 (启动/停止/重启/自启)"
-    echo " 3. 执行在线下载安装/覆盖更新"
-    echo " 4. 彻底卸载 Docker 及其组件"
-    echo " 0. 退出管理窗口"
-    echo -e "${GREEN}======================================================${NC}"
-    read -p "请选择交互选项 [0-4]: " main_choice < /dev/tty
-
-    case "$main_choice" in
+    echo -e "${GREEN}+======================================================+${NC}"
+    echo -e "${GREEN}|       Docker & Compose 管理中心 (ck_sysinit)         |${NC}"
+    echo -e "${GREEN}+------------------------------------------------------+${NC}"
+    echo -e "  引擎: ${YELLOW}${D_SHORT}${NC}   |   Compose: ${YELLOW}${C_SHORT}${NC}"
+    echo -e "${GREEN}+------------------------------------------------------+${NC}"
+    echo "  1. 查看监控/详细配置 (daemon.json)"
+    echo "  2. Docker 服务指令管理 (启动/停止/重启/自启)"
+    echo "  3. 执行安装 / 覆盖更新"
+    echo "  4. 彻底卸载 Docker 及其组件"
+    echo "  0. 退出"
+    echo -e "${GREEN}+======================================================+${NC}"
+    read -p "请选择 [0-4]: " ch < /dev/tty
+    case "$ch" in
         1) check_docker_status ;;
         2) manage_docker_service ;;
         3) perform_install ;;
         4) perform_uninstall ;;
-        0) echo -e " 退出中..."; exit 0 ;;
-        *) echo -e "${RED} 无效参数${NC}"; sleep 1 ;;
+        0) echo "  退出中..."; exit 0 ;;
+        *) echo -e "${RED}  无效参数${NC}"; sleep 1 ;;
     esac
 done
