@@ -188,7 +188,7 @@ _docker_main_menu() {
         echo "  5. 配置私有镜像库 (Private Registry)"
         echo "  0. 返回主菜单"
         echo -e "${GREEN}+======================================================+${NC}"
-        read -rp "请选择 [0-4]: " dc_choice < /dev/tty
+        read -rp "请选择 [0-5]: " dc_choice < /dev/tty
 
         case "$dc_choice" in
             1) _docker_show_status ;;
@@ -228,58 +228,142 @@ _docker_show_status() {
 }
 
 # ── 5. 私有库配置 ────────────────────────────────────────────────
+# 用法: _docker_select_cn_mirrors <结果数组名引用>
+_docker_select_cn_mirrors() {
+    local -n _result_ref=$1
+    # 预置国内加速源 (纯 HTTPS，可安全放入 registry-mirrors)
+    local cn_names=(
+        "阿里云 (杭州)"
+        "腾讯云"
+        "DaoCloud"
+        "网易云"
+        "百度云"
+        "中科大 (USTC)"
+        "华为云"
+    )
+    local cn_urls=(
+        "https://registry.cn-hangzhou.aliyuncs.com"
+        "https://mirror.ccs.tencentyun.com"
+        "https://docker.m.daocloud.io"
+        "https://hub-mirror.c.163.com"
+        "https://mirror.baidubce.com"
+        "https://docker.mirrors.ustc.edu.cn"
+        "https://b9pmyelo.mirror.aliyuncs.com"
+    )
+    clear
+    echo -e "${CYAN}+================ 选择国内镜像加速源 ================+${NC}"
+    echo -e "  说明: 所选源写入 registry-mirrors（均为 HTTPS，不会出现 HTTP 降级问题）"
+    echo -e "${CYAN}+----------------------------------------------------+${NC}"
+    local idx
+    for idx in "${!cn_names[@]}"; do
+        printf "  %d. %-20s  %s\n" "$((idx+1))" "${cn_names[$idx]}" "${cn_urls[$idx]}"
+    done
+    echo ""
+    echo "  A. 全选所有加速源"
+    echo "  C. 自定义输入加速源 URL"
+    echo "  0. 跳过（不添加公共加速源）"
+    echo -e "${CYAN}+----------------------------------------------------+${NC}"
+    echo -e "  ${YELLOW}提示:${NC} 多选请用空格分隔编号，例如: 1 3 5"
+    read -rp "  请选择 [0/A/C/编号]: " sel < /dev/tty
+    if [[ "${sel,,}" == "0" ]]; then
+        echo -e "  ${YELLOW}[跳过]${NC} 不添加公共加速源"
+        return
+    elif [[ "${sel,,}" == "a" ]]; then
+        for url in "${cn_urls[@]}"; do
+            _result_ref+=("\"${url}\"")
+        done
+        echo -e "  ${GREEN}[OK]${NC} 已添加全部 ${#cn_urls[@]} 个加速源"
+    elif [[ "${sel,,}" == "c" ]]; then
+        while true; do
+            read -rp "  输入自定义加速源 URL (留空结束): " custom_url < /dev/tty
+            [ -z "$custom_url" ] && break
+            # 强制确保使用 HTTPS
+            custom_url="${custom_url#http://}"
+            custom_url="https://${custom_url#https://}"
+            _result_ref+=("\"${custom_url}\"")
+            echo -e "  ${GREEN}[已添加]${NC} ${custom_url}"
+        done
+    else
+        local added=0
+        for num in $sel; do
+            if [[ "$num" =~ ^[0-9]+$ ]] && [ "$num" -ge 1 ] && [ "$num" -le "${#cn_names[@]}" ]; then
+                local url="${cn_urls[$((num-1))]}"
+                _result_ref+=("\"${url}\"")
+                echo -e "  ${GREEN}[已添加]${NC} ${cn_names[$((num-1))]}: ${url}"
+                ((added++))
+            else
+                echo -e "  ${YELLOW}[忽略]${NC} 无效编号: $num"
+            fi
+        done
+        [ $added -eq 0 ] && echo -e "  ${YELLOW}[提示]${NC} 未选择任何加速源"
+    fi
+    echo ""
+}
+
 _docker_config_private_registry() {
     clear
     echo -e "${BLUE}+================ 配置私有镜像库 ================+${NC}"
     echo -e "  说明: 用于添加内网或私有 Docker 仓库。"
-    echo -e "  如果是 HTTP 协议，将自动添加到 insecure-registries。"
+    echo -e "  HTTP 私有库 → 写入 insecure-registries（不进 registry-mirrors）"
+    echo -e "  HTTPS 私有库 → 写入 registry-mirrors"
     echo -e "${BLUE}+--------------------------------------------------+${NC}"
 
-    local mirrors=()
-    local insecure=()
-    
-    # 尝试从现有配置中读取 (非 jq 环境下的简易读取提示)
-    if [ -f /etc/docker/daemon.json ]; then
-        echo -e "${YELLOW}提示: 此操作将重新生成 daemon.json，包含标准加速源和您的私有库。${NC}"
-    fi
+    # ── Step 1: 选择国内公共加速源 ─────────────────────────────
+    local public_mirrors=()
+    _docker_select_cn_mirrors public_mirrors
 
-    # 循环采集
+    # ── Step 2: 循环采集私有库 ─────────────────────────────────
+    local priv_https=()   # HTTPS 私有库 → 进 registry-mirrors
+    local insecure=()     # HTTP  私有库 → 进 insecure-registries（裸地址）
+
+    echo -e "${BLUE}+--------------------------------------------------+${NC}"
+    echo -e "  开始添加私有库（直接回车跳过）:"
     while true; do
-        read -p "请输入私有库地址 (例如 192.168.1.100:5000): " priv_addr < /dev/tty
+        read -rp "  请输入私有库地址 (例如 192.168.1.100:5000): " priv_addr < /dev/tty
         [ -z "$priv_addr" ] && break
 
-        read -p "是否使用 HTTP 协议 (非 HTTPS)？[y/n, 默认n]: " is_http < /dev/tty
-        
-        # 统一添加到 mirrors
+        # 去掉用户误带的协议头，由程序统一处理
+        priv_addr="${priv_addr#http://}"
+        priv_addr="${priv_addr#https://}"
+
+        read -rp "  该地址是否使用 HTTP 协议 (非 HTTPS)？[y/N]: " is_http < /dev/tty
+
         if [[ "${is_http,,}" == "y" ]]; then
-            mirrors+=("\"http://${priv_addr}\"")
+            # !! 核心修复: HTTP地址只进 insecure-registries，绝不写入 registry-mirrors
+            # registry-mirrors 中的条目 Docker 总以 HTTPS 连接，写入 http:// 反而更糟
             insecure+=("\"${priv_addr}\"")
+            echo -e "  ${YELLOW}[HTTP]${NC}  已添加到 insecure-registries: ${priv_addr}"
         else
-            mirrors+=("\"https://${priv_addr}\"")
+            priv_https+=("\"https://${priv_addr}\"")
+            echo -e "  ${GREEN}[HTTPS]${NC} 已添加到 registry-mirrors: ${priv_addr}"
         fi
 
-        read -p "继续添加下一个私有库？[y/n, 默认n]: " next < /dev/tty
+        read -rp "  继续添加下一个私有库？[y/N]: " next < /dev/tty
         [[ "${next,,}" != "y" ]] && break
     done
 
-    [ ${#mirrors[@]} -eq 0 ] && echo "未添加任何配置。" && sleep 1 && return
+    # 检查: 至少选了加速源或添加了私有库
+    if [ ${#public_mirrors[@]} -eq 0 ] && [ ${#priv_https[@]} -eq 0 ] && [ ${#insecure[@]} -eq 0 ]; then
+        echo -e "  ${YELLOW}[提示]${NC} 未选择任何配置，操作取消。"
+        sleep 1
+        return
+    fi
 
-    # 准备写入 daemon.json
+    # ── Step 3: 合并 registry-mirrors = 公共源 + HTTPS私有库 ───
+    local all_mirrors=("${public_mirrors[@]}" "${priv_https[@]}")
+
+    # ── Step 4: 备份旧配置 ──────────────────────────────────────
     mkdir -p /etc/docker
-    
-    # 默认公共源 (国内常用)
-    local public_mirrors=(
-        "\"https://registry.cn-hangzhou.aliyuncs.com\""
-        "\"https://mirror.ccs.tencentyun.com\""
-        "\"https://docker.m.daocloud.io\""
-    )
-    
-    # 合并
-    local all_mirrors=("${public_mirrors[@]}" "${mirrors[@]}")
-    
-    # 构建 JSON (简易拼接，确保不依赖 jq)
+    if [ -f /etc/docker/daemon.json ]; then
+        local bak_file="/etc/docker/daemon.json.bak_$(date +%Y%m%d_%H%M%S)"
+        cp /etc/docker/daemon.json "${bak_file}"
+        echo -e "  ${YELLOW}[备份]${NC} 旧配置已备份至: ${bak_file}"
+    fi
+
+    # ── Step 5: 生成 daemon.json (无 jq 依赖的纯 bash 拼接) ────
     {
         echo "{"
+        # registry-mirrors: 仅写入 HTTPS 地址
         echo "  \"registry-mirrors\": ["
         local m_len=${#all_mirrors[@]}
         for ((i=0; i<m_len; i++)); do
@@ -288,20 +372,18 @@ _docker_config_private_registry() {
             echo "    ${all_mirrors[i]}${comma}"
         done
         echo "  ],"
-        
-        # 写入 insecure-registries
+
+        # insecure-registries: 仅写入 HTTP 私有库的裸地址（host:port 格式）
         echo "  \"insecure-registries\": ["
         local i_len=${#insecure[@]}
-        if [ $i_len -gt 0 ]; then
-            for ((i=0; i<i_len; i++)); do
-                local comma=","
-                [ $((i+1)) -eq $i_len ] && comma=""
-                echo "    ${insecure[i]}${comma}"
-            done
-        fi
+        for ((i=0; i<i_len; i++)); do
+            local comma=","
+            [ $((i+1)) -eq $i_len ] && comma=""
+            echo "    ${insecure[i]}${comma}"
+        done
         echo "  ],"
-        
-        # 写入其他通用性能配置 (保持高性能生产环境推荐值)
+
+        # 通用性能配置（生产环境推荐值）
         echo "  \"exec-opts\": [\"native.cgroupdriver=systemd\"],"
         echo "  \"log-driver\": \"json-file\","
         echo "  \"log-opts\": { \"max-size\": \"100m\" },"
@@ -309,10 +391,41 @@ _docker_config_private_registry() {
         echo "}"
     } > /etc/docker/daemon.json
 
-    echo -e "\n${GREEN}[OK]${NC} 配置已更新至 /etc/docker/daemon.json"
-    echo -e "${YELLOW}请手动重启 Docker 以生效:${NC}"
-    echo -e "  systemctl daemon-reload && systemctl restart docker"
-    read -p "按回车键返回..." < /dev/tty
+    # ── Step 6: 预览生成结果 ────────────────────────────────────
+    echo ""
+    echo -e "${GREEN}+================ 配置生成完成 ================+${NC}"
+    echo -e "  ${GREEN}[OK]${NC} 配置已写入: /etc/docker/daemon.json"
+    echo -e "  ${CYAN}--- 配置内容预览 ---${NC}"
+    cat /etc/docker/daemon.json
+    echo -e "${GREEN}+----------------------------------------------+${NC}"
+    echo -e "  ${YELLOW}[防误提示]${NC}"
+    echo -e "   - HTTP 私有库已写入 insecure-registries（裸 host:port）"
+    echo -e "   - 不会因 HTTP→HTTPS 自动转换导致连接失败"
+    echo -e "   - HTTPS 私有库正常写入 registry-mirrors"
+    echo -e "${GREEN}+----------------------------------------------+${NC}"
+
+    # ── Step 7: 询问是否立即重启 ────────────────────────────────
+    echo ""
+    read -rp "  是否立即重启 Docker 以使配置生效？[y/N]: " do_restart < /dev/tty
+    if [[ "${do_restart,,}" == "y" ]]; then
+        echo -e "  >> 正在重载 systemd 并重启 Docker..."
+        systemctl daemon-reload
+        systemctl restart docker
+        sleep 2
+        local status
+        status=$(systemctl is-active docker 2>/dev/null)
+        if [[ "$status" == "active" ]]; then
+            echo -e "  ${GREEN}[OK]${NC} Docker 重启成功，当前状态: ${GREEN}active${NC}"
+        else
+            echo -e "  ${RED}[FAIL]${NC} Docker 状态异常: ${RED}${status}${NC}"
+            echo -e "  排查命令: journalctl -u docker -n 30 --no-pager"
+        fi
+    else
+        echo -e "  ${YELLOW}请手动执行:${NC}"
+        echo -e "   systemctl daemon-reload && systemctl restart docker"
+    fi
+    echo ""
+    read -rp "按回车键返回菜单..." < /dev/tty
 }
 
 # ── 2. 服务管理 ──────────────────────────────────────────────────
