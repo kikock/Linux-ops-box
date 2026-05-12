@@ -101,6 +101,7 @@ _docker_curl_dl() {
     else
         echo ""
         echo -e "  ${RED}[失败]${NC} $label  下载失败，请检查网络或版本号"
+        read -rp "按回车键继续..." < /dev/tty
         return 1
     fi
 }
@@ -469,7 +470,11 @@ _docker_install_menu() {
     echo -e "${BLUE}+===============================================+${NC}"
     read -rp "请选择 [1-2, 默认2]: " mode < /dev/tty
     mode=${mode:-2}
-    [ "$mode" == "1" ] && _docker_install_via_repo || _docker_install_via_binary
+    if [ "$mode" == "1" ]; then
+        _docker_install_via_repo || { echo -e "${RED}软件包模式安装失败。${NC}"; read -rp "按回车键返回..." < /dev/tty; }
+    else
+        _docker_install_via_binary || { echo -e "${RED}静态编译模式安装失败。${NC}"; read -rp "按回车键返回..." < /dev/tty; }
+    fi
 }
 
 # ── 3a. 软件包模式 ───────────────────────────────────────────────
