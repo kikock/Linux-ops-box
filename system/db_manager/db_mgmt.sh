@@ -178,11 +178,16 @@ check_db_client() {
 test_connection() {
     local type="$1" host="$2" port="$3" user="$4" pass="$5"
     local mode="${6:-host}" container="${7:-}"
+    local timeout="${8:-5}"
+    
+    # 检查所需的客户端工具是否存在
+    check_db_client "$type" "$mode" "$container" || return 1
+
     local err_out ret
     if [ "$mode" = "docker" ] && [ -n "$container" ]; then
         if [ "$type" = "mysql" ]; then
             err_out=$(docker exec -i "$container" mysql -u"$user" -p"$pass" \
-                --connect-timeout=5 -e "SELECT 1;" 2>&1 >/dev/null); ret=$?
+                --connect-timeout="$timeout" -e "SELECT 1;" 2>&1 >/dev/null); ret=$?
         else
             err_out=$(docker exec -i "$container" psql -U "$user" \
                 -c "SELECT 1;" 2>&1 >/dev/null); ret=$?
@@ -190,10 +195,10 @@ test_connection() {
     else
         if [ "$type" = "mysql" ]; then
             err_out=$(MYSQL_PWD="$pass" mysql -h"$host" -P"$port" -u"$user" \
-                --connect-timeout=5 -e "SELECT 1;" 2>&1 >/dev/null); ret=$?
+                --connect-timeout="$timeout" -e "SELECT 1;" 2>&1 >/dev/null); ret=$?
         else
-            err_out=$(PGPASSWORD="$pass" psql -h "$host" -p "$port" -U "$user" \
-                --connect-timeout=5 -c "SELECT 1;" 2>&1 >/dev/null); ret=$?
+            err_out=$(PGCONNECT_TIMEOUT="$timeout" PGPASSWORD="$pass" psql -h "$host" -p "$port" -U "$user" \
+                -c "SELECT 1;" 2>&1 >/dev/null); ret=$?
         fi
     fi
     if [ "$ret" -ne 0 ]; then
@@ -274,7 +279,7 @@ add_connection() {
         read -rp "端口 [$def_port]: " port; port="${port:-$def_port}"
     fi
     read -rp "用户名 [root]: " user; user="${user:-root}"
-    read -rsp "密码: " pass; echo ""
+    read -rp "密码: " pass
 
     log_info "正在测试连接..."
     if test_connection "$type" "$host" "$port" "$user" "$pass" "$mode" "$container"; then
@@ -314,7 +319,34 @@ show_connections() {
     log_title "已配置的数据库连接"
     local count; count=$(get_connection_count)
     if [ "$count" -eq 0 ]; then log_warn "暂无配置"; return; fi
-    jq -r '.[] | "\(.alias)  \(.type)  \(.host):\(.port)  用户:\(.user)  模式:\(.mode // "host")\(if .container != null and .container != "" then "  容器:\(.container)" else "" end)"' "$DB_CONFIG_FILE"
+
+    echo -e "  ${BOLD}$(printf '%-15s %-8s %-22s %-12s %-15s %-10s %-8s' "别名" "类型" "主机:端口" "用户" "密码" "模式" "状态")${NC}"
+    echo -e "  ${CYAN}$(printf '%.0s─' {1..100})${NC}"
+
+    local i=0
+    while [ $i -lt "$count" ]; do
+        local alias type host port user pass mode container
+        alias=$(jq -r ".[$i].alias" "$DB_CONFIG_FILE")
+        type=$(jq -r ".[$i].type" "$DB_CONFIG_FILE")
+        host=$(jq -r ".[$i].host" "$DB_CONFIG_FILE")
+        port=$(jq -r ".[$i].port" "$DB_CONFIG_FILE")
+        user=$(jq -r ".[$i].user" "$DB_CONFIG_FILE")
+        pass=$(jq -r ".[$i].password" "$DB_CONFIG_FILE")
+        mode=$(jq -r ".[$i].mode // \"host\"" "$DB_CONFIG_FILE")
+        container=$(jq -r ".[$i].container // \"\"" "$DB_CONFIG_FILE")
+
+        # 检查状态 (使用 2s 超时以免列表加载过慢)
+        local status_text="${RED}离线${NC}"
+        if test_connection "$type" "$host" "$port" "$user" "$pass" "$mode" "$container" 2 &>/dev/null; then
+            status_text="${GREEN}在线${NC}"
+        fi
+
+        local display_mode="$mode"
+        [ "$mode" = "docker" ] && display_mode="docker(${container:0:8})"
+        
+        echo -e "  $(printf '%-15s %-8s %-22s %-12s %-15s %-10s' "$alias" "$type" "$host:$port" "$user" "$pass" "$display_mode") $status_text"
+        ((i++))
+    done
 }
 
 # ── 备份单库 ──────────────────────────────────────────────────────
@@ -835,11 +867,17 @@ cron_backup_run() {
 # ── 配置管理菜单 ──────────────────────────────────────────────────
 config_menu() {
     while true; do
-        log_title "数据库连接配置"
-        echo -e "  ${GREEN}[1]${NC} 查看所有连接"
+        clear
+        echo -e "${BOLD}${CYAN}"
+        echo "  ┌──────────────────────────────────────┐"
+        echo "  │        数据库连接配置管理            │"
+        echo "  └──────────────────────────────────────┘"
+        echo -e "${NC}"
+        echo -e "  ${GREEN}[1]${NC} 查看所有连接 (带在线状态)"
         echo -e "  ${GREEN}[2]${NC} 添加新连接"
         echo -e "  ${GREEN}[3]${NC} 删除连接"
-        echo -e "  ${GREEN}[0]${NC} 返回主菜单"
+        echo -e "  ${RED}[0]${NC} 返回主菜单"
+        echo ""
         read -rp "请选择: " ch
         case "$ch" in
             1) show_connections; press_enter ;;
@@ -1599,6 +1637,12 @@ main_menu() {
         echo "  ║  支持 Host 直连和 Docker 容器模式    ║"
         echo "  ╚══════════════════════════════════════╝"
         echo -e "${NC}"
+
+        # 检查是否安装了必要的管理工具
+        if ! command -v mysql &>/dev/null && ! command -v docker &>/dev/null; then
+            echo -e "  ${RED}${BOLD}[ ⚠️  警告: 未安装 mysql 或 docker，不能进行数据库管理 ]${NC}"
+            echo ""
+        fi
         echo -e "  ${GREEN}[1]${NC} 备份数据库"
         echo -e "  ${GREEN}[2]${NC} 恢复数据库"
         echo -e "  ${GREEN}[3]${NC} 管理数据库连接配置"
