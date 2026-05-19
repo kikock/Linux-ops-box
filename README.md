@@ -35,8 +35,10 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 | 6 | **网络 IP 与网卡诊断** | 静态 IP / 路由 / 网卡信息 | `network.sh` |
 | 7 | **系统资源与服务监控** | 进程 / Nginx 状态 / 磁盘 IO | `nginx_view.sh` |
 | 8 | **数据库管理中心** | 备份/恢复/连接管理/定时备份/数据表归档 (详见 §5) | `db_mgmt_loader.sh` |
-| 9 | **在线更新工具箱** | 自动探测最优下载通道并云端覆写 | 内置 |
-| 10 | **卸载工具箱** | 清理软链接与守护目录 | 内置 |
+| 9 | **Docker 管理中心** | 安装/服务管理/Compose 编排 | `docker_mgmt.sh` |
+| 10 | **VNC 服务管理中心** | 一键安装 VNC / 桌面自启动 / 多端口多账户 | `vnc_mgmt.sh` |
+| 11 | **在线更新工具箱** | 自动探测最优下载通道并云端覆写 | 内置 |
+| 12 | **卸载工具箱** | 清理软链接与守护目录 | 内置 |
 
 ### 辅助模块体系:
 
@@ -46,6 +48,7 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 | `ecs.sh` | ECS/云服务器专项运维工具集（性能监控大屏、IO 分析等） |
 | `sing-box-plus.sh` | Sing-Box 代理管理集成模块（安装/配置/订阅管理） |
 | `db_mgmt_loader.sh` | 数据库模块适配加载器，将 `db_manager/db_mgmt.sh` 接入 TUI 菜单 |
+| `vnc_mgmt.sh` | VNC 服务管理中心模块：支持运行状态监控、一键部署实例、服务启停与彻底注销 |
 
 ---
 
@@ -105,7 +108,29 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 
 ---
 
-## 🗄 5. 数据库管理中心 (db_manager)
+## 🖥 5. 麒麟 VNC 一键部署与服务管理器 (install_vnc.sh)
+
+独立的 VNC 全自动安装与管理工具，针对银河麒麟服务器安全基线与 TigerVNC 现代/传统双架构体系进行完美适配。
+
+### 快捷安装/配置 (主控端/独立拉取):
+
+```bash
+curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_vnc.sh | sudo bash
+```
+
+### 核心特性:
+
+1. **环境诊断与 GUI 一键直装**: 智能检测系统是否已具备图形环境。若无，提供一键式 UKUI (麒麟默认) / MATE / XFCE 等桌面环境自适应安装，解决 VNC 连接后“黑屏”或“仅有鼠标”的痛点。
+2. **密码安全标准**: 自动限制密码长度在 6~8 位（超长智能截断符合 TigerVNC 规范），动态创建用户专属的 `.vnc/passwd` 安全权限环。
+3. **极速自启守护映射**: 
+   - **现代架构 (Kylin V10 SP2/SP3, openEuler 22.03+, RHEL 8+)**: 基于 `/etc/tigervnc/vncserver.users` 绑定多端口与多用户，动态生成 `session` 桌面配置。
+   - **经典架构 (CentOS 7, Ubuntu/Debian 较老系统)**: 自动提取模板、克隆并动态替换 `<USER>`，提供安全的 `systemd` 服务。
+4. **锁文件深度重置**: 遭遇断电、服务崩溃导致的 X11 锁残留（`/tmp/.X*-lock`）时，系统自动执行深度链条扫描并重置以确保 100% 重启成功率。
+5. **防火墙联动放行**: 自动感知 FirewallD 或 UFW，动态计算端口（5900 + 桌面显示编号）并写入放行策略。
+
+---
+
+## 🗄 6. 数据库管理中心 (db_manager)
 
 已内置于 `ck_sysinit` 主菜单 **「8. 数据库管理中心」**，无需单独部署。支持 MySQL / PostgreSQL 的宿主机直连与 Docker 容器两种连接模式。
 
@@ -162,7 +187,7 @@ system/db_manager/
   容器名: mysql-prod                            → [DOCKER]
 ```
 
-## 📦 6. 离线安装方案 (无网络环境)
+## 📦 7. 离线安装方案 (无网络环境)
 
 针对物理隔离、内网环境或 Github 连接极其不稳定的场景，本工具箱支持 **“有网下载、离线部署”** 的自适应本地安装逻辑。
 
@@ -190,7 +215,7 @@ sudo bash install_system.sh
 
 ---
 
-## ⌨️ 7. 命令行参数 (CLI)
+## ⌨️ 8. 命令行参数 (CLI)
 
 `ck_sysinit` 支持以下命令行参数，可在任意目录直接执行：
 

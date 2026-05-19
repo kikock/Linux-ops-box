@@ -48,6 +48,9 @@ fi
 if [ -f "$BASE_DIR/modules/docker_mgmt.sh" ]; then
     source "$BASE_DIR/modules/docker_mgmt.sh"
 fi
+if [ -f "$BASE_DIR/modules/vnc_mgmt.sh" ]; then
+    source "$BASE_DIR/modules/vnc_mgmt.sh"
+fi
 
 # ================================================================
 # 1. 静态环境参数自检 (只在启动时检索 1 次，缓存以提升性能)
@@ -207,12 +210,13 @@ while true; do
     echo -e "${GREEN}══════════════ 📦  基础服务中心 ══════════════${NC}"
     echo " 8. 数据库管理中心       (MySQL/PostgreSQL 备份归档)"
     echo " 9. Docker 管理中心      (安装/服务管理/Compose)"
+    echo " 10. VNC 服务管理中心     (一键安装/自启/多账户)"
     echo -e "${GREEN}══════════════ ⚙   工具箱管理   ══════════════${NC}"
-    echo -e "${YELLOW} 10. ♻  在线更新工具箱${NC}"
-    echo -e "${RED} 11. 🗑  卸载此工具箱${NC}"
+    echo -e "${YELLOW} 11. ♻  在线更新工具箱${NC}"
+    echo -e "${RED} 12. 🗑  卸载此工具箱${NC}"
     echo " 0.  退出工具箱"
     echo -e "${GREEN}==============================================${NC}"
-    read -p "请输入指令编号 [0-11]: " choice < /dev/tty
+    read -p "请输入指令编号 [0-12]: " choice < /dev/tty
 
     case $choice in
         1)  update_system_packages ;;
@@ -224,8 +228,9 @@ while true; do
         7)  nginx_menu ;;
         8)  db_management_center ;;
         9)  docker_management_center ;;
-        10) _update_toolbox ;;
-        11)
+        10) vnc_management_center ;;
+        11) _update_toolbox ;;
+        12)
             echo -e "${YELLOW}警告: 即将执行彻底卸载程序...${NC}"
             read -p "是否确认从系统中移除 Linux-ops-box? [y/N]: " confirm
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
