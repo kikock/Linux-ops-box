@@ -452,11 +452,11 @@ User=${VNC_USER}
 Group=${user_group}
 WorkingDirectory=${USER_HOME}
 
-PIDFile=${USER_HOME}/.vnc/%H:%i.pid
+PIDFile=${USER_HOME}/.vnc/%H%i.pid
 
-ExecStartPre=-${VNC_BIN} -kill :%i > /dev/null 2>&1
-ExecStart=${VNC_BIN} :%i -geometry 1920x1080 -depth 24 -alwaysshared
-ExecStop=${VNC_BIN} -kill :%i
+ExecStartPre=-${VNC_BIN} -kill %i > /dev/null 2>&1
+ExecStart=${VNC_BIN} %i -geometry 1920x1080 -depth 24 -alwaysshared
+ExecStop=${VNC_BIN} -kill %i
 
 [Install]
 WantedBy=multi-user.target
