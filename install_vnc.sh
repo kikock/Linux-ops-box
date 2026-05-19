@@ -350,23 +350,23 @@ vncconfig -iconic &
 # 自动探测并拉起当前系统最佳的图形桌面
 if [ -x /usr/bin/ukui-session ]; then
     # 银河麒麟默认 UKUI 桌面
-    dbus-launch --exit-with-session /usr/bin/ukui-session &
+    exec dbus-launch --exit-with-session /usr/bin/ukui-session
 elif [ -x /usr/bin/mate-session ]; then
     # MATE 桌面
-    dbus-launch --exit-with-session /usr/bin/mate-session &
+    exec dbus-launch --exit-with-session /usr/bin/mate-session
 elif [ -x /usr/bin/gnome-session ]; then
     # GNOME 桌面
     export XDG_CURRENT_DESKTOP="GNOME"
-    gnome-session &
+    exec gnome-session
 elif [ -x /usr/bin/xfce4-session ]; then
     # XFCE 桌面
-    dbus-launch --exit-with-session /usr/bin/xfce4-session &
+    exec dbus-launch --exit-with-session /usr/bin/xfce4-session
 elif [ -x /usr/bin/startxfce4 ]; then
-    startxfce4 &
+    exec startxfce4
 else
     # 极简窗口管理器兜底
     [ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
-    x-window-manager &
+    exec x-window-manager
 fi
 EOF
 

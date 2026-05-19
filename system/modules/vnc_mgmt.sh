@@ -168,7 +168,13 @@ vnc_inspect_status() {
             
             echo -e "\n3. Systemd 详细活动状态:"
             echo -e "------------------------------------------------------------"
-            systemctl status "vncserver@:${dnum}.service" --no-pager -n 3 2>/dev/null || echo -e "${RED}无法拉取 Systemd 状态或服务未配置。${NC}"
+            systemctl status "vncserver@:${dnum}.service" &>/dev/null
+            local status_exit=$?
+            if [ "$status_exit" -eq 4 ]; then
+                echo -e "${RED}无法拉取 Systemd 状态或服务未配置。${NC}"
+            else
+                systemctl status "vncserver@:${dnum}.service" --no-pager -n 10
+            fi
             echo -e "------------------------------------------------------------"
             
             echo -e "\n4. 活动连接会话审计:"
