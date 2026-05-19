@@ -108,9 +108,9 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 
 ---
 
-## 🖥 5. 麒麟 VNC 一键部署与服务管理器 (install_vnc.sh)
+## 🖥 5. 通用 Linux VNC 一键部署与服务管理器 (install_vnc.sh)
 
-独立的 VNC 全自动安装与管理工具，针对银河麒麟服务器安全基线与 TigerVNC 现代/传统双架构体系进行完美适配。
+独立的 VNC 全自动安装与管理工具，深度适配银河麒麟高级服务器 (V10)、openEuler、CentOS、Rocky、AlmaLinux、Ubuntu、Debian、Arch Linux 以及 Alpine Linux 等主流操作系统发行版。
 
 ### 快捷安装/配置 (主控端/独立拉取):
 
@@ -120,11 +120,11 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 
 ### 核心特性:
 
-1. **环境诊断与 GUI 一键直装**: 智能检测系统是否已具备图形环境。若无，提供一键式 UKUI (麒麟默认) / MATE / XFCE 等桌面环境自适应安装，解决 VNC 连接后“黑屏”或“仅有鼠标”的痛点。
+1. **多端环境诊断与 GUI 一键直装**: 智能检测系统是否已具备图形环境。若无，提供一键式 UKUI (麒麟默认) / MATE / XFCE 等桌面环境自适应安装。对 CentOS/Rocky/AlmaLinux 等红帽系发行版自动检测并启用 EPEL 软件源，对 Debian/Ubuntu 自动集成 `dbus-x11` 会话锁，对 Arch & Alpine 执行跨架构依赖预置，彻底消除“黑屏”或“仅有鼠标”的空视窗痛点。
 2. **密码安全标准**: 自动限制密码长度在 6~8 位（超长智能截断符合 TigerVNC 规范），动态创建用户专属的 `.vnc/passwd` 安全权限环。
 3. **极速自启守护映射**: 
-   - **现代架构 (Kylin V10 SP2/SP3, openEuler 22.03+, RHEL 8+)**: 基于 `/etc/tigervnc/vncserver.users` 绑定多端口与多用户，动态生成 `session` 桌面配置。
-   - **经典架构 (CentOS 7, Ubuntu/Debian 较老系统)**: 自动提取模板、克隆并动态替换 `<USER>`，提供安全的 `systemd` 服务。
+   - **现代架构 (Kylin V10 SP2/SP3, openEuler 22.03+, RHEL/Rocky/Alma 8+)**: 基于 `/etc/tigervnc/vncserver.users` 绑定多端口与多用户，动态生成 `session` 桌面配置。
+   - **经典与其它架构 (CentOS 7, Debian, Ubuntu, Arch, Alpine)**: 自动提取模板；若环境缺省，则基于系统命令动态构建极其稳健的兼容型 `systemd` 服务，提供无感自启。
 4. **锁文件深度重置**: 遭遇断电、服务崩溃导致的 X11 锁残留（`/tmp/.X*-lock`）时，系统自动执行深度链条扫描并重置以确保 100% 重启成功率。
 5. **防火墙联动放行**: 自动感知 FirewallD 或 UFW，动态计算端口（5900 + 桌面显示编号）并写入放行策略。
 

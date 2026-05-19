@@ -43,8 +43,8 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 echo -e "${BLUE}======================================================${NC}"
-echo -e "${GREEN}      麒麟服务器 VNC 服务一键安装与自启配置程序         ${NC}"
-echo -e "${CYAN}             适用系统: 银河麒麟 V10 / openEuler        ${NC}"
+echo -e "${GREEN}      Linux 服务器 VNC 服务一键安装与自启配置程序       ${NC}"
+echo -e "${CYAN}   适用系统: 麒麟/openEuler/Rocky/CentOS/Ubuntu/Debian/Arch/Alpine  ${NC}"
 echo -e "${BLUE}======================================================${NC}"
 
 # 2. 系统发行版与包管理器自适应检测
@@ -67,9 +67,17 @@ _init_distro() {
                 PKG_MGR="yum"
             fi
             ;;
-        ubuntu|debian|linx)
+        ubuntu|debian|linx|deepin|uos|ubuntu-ky)
             DISTRO_FAMILY="debian"
             PKG_MGR="apt-get"
+            ;;
+        arch|manjaro)
+            DISTRO_FAMILY="arch"
+            PKG_MGR="pacman"
+            ;;
+        alpine)
+            DISTRO_FAMILY="alpine"
+            PKG_MGR="apk"
             ;;
         *)
             # 兜底检测
@@ -82,6 +90,12 @@ _init_distro() {
             elif command -v yum &>/dev/null; then
                 DISTRO_FAMILY="redhat"
                 PKG_MGR="yum"
+            elif command -v pacman &>/dev/null; then
+                DISTRO_FAMILY="arch"
+                PKG_MGR="pacman"
+            elif command -v apk &>/dev/null; then
+                DISTRO_FAMILY="alpine"
+                PKG_MGR="apk"
             fi
             ;;
     esac
@@ -119,47 +133,69 @@ check_and_install_gui() {
     echo -e "${YELLOW}------------------------------------------------------${NC}"
     
     read -p "请输入选项 [0-4]: " gui_choice < /dev/tty
-    case "$gui_choice" in
-        1)
-            _log_info "正在为您安装 UKUI 桌面环境，此过程可能需要几分钟，请耐心等待..."
-            if [ "$DISTRO_FAMILY" = "redhat" ]; then
-                $PKG_MGR groupinstall -y "UKUI Desktop" || $PKG_MGR install -y ukui
-            else
-                apt-get update && apt-get install -y ukui-desktop-environment
+    
+    if [ "$gui_choice" = "1" ]; then
+        _log_info "正在为您安装 UKUI 桌面环境，此过程可能需要几分钟，请耐心等待..."
+        if [ "$DISTRO_FAMILY" = "redhat" ]; then
+            $PKG_MGR groupinstall -y "UKUI Desktop" || $PKG_MGR install -y ukui
+        elif [ "$DISTRO_FAMILY" = "debian" ]; then
+            apt-get update && apt-get install -y ukui-desktop-environment
+        else
+            _log_warn "该系统体系暂未支持自动部署 UKUI，自动切换为安装 XFCE..."
+            gui_choice="3"
+        fi
+    fi
+
+    if [ "$gui_choice" = "2" ]; then
+        _log_info "正在为您安装 MATE 桌面环境，此过程可能需要几分钟..."
+        if [ "$DISTRO_FAMILY" = "redhat" ]; then
+            if [[ "$DISTRO_ID" =~ (centos|rhel|rocky|almalinux) ]]; then
+                if ! rpm -q epel-release &>/dev/null; then
+                    _log_warn "检测到系统未启用 EPEL 软件源，正在为您部署 EPEL 以便下载图形组件..."
+                    $PKG_MGR install -y epel-release || true
+                fi
             fi
-            ;;
-        2)
-            _log_info "正在为您安装 MATE 桌面环境，此过程可能需要几分钟..."
-            if [ "$DISTRO_FAMILY" = "redhat" ]; then
-                $PKG_MGR groupinstall -y "MATE Desktop" || $PKG_MGR install -y mate-desktop
-            else
-                apt-get update && apt-get install -y mate-desktop-environment
+            $PKG_MGR groupinstall -y "MATE Desktop" || $PKG_MGR install -y mate-desktop
+        elif [ "$DISTRO_FAMILY" = "debian" ]; then
+            apt-get update && apt-get install -y mate-desktop-environment
+        elif [ "$DISTRO_FAMILY" = "arch" ]; then
+            pacman -Sy --noconfirm mate mate-extra
+        elif [ "$DISTRO_FAMILY" = "alpine" ]; then
+            apk update && apk add mate-desktop mate-icon-theme dbus xf86-input-libinput
+        fi
+    elif [ "$gui_choice" = "3" ]; then
+        _log_info "正在为您安装 XFCE 桌面环境，此过程可能需要几分钟..."
+        if [ "$DISTRO_FAMILY" = "redhat" ]; then
+            if [[ "$DISTRO_ID" =~ (centos|rhel|rocky|almalinux) ]]; then
+                if ! rpm -q epel-release &>/dev/null; then
+                    _log_warn "检测到系统未启用 EPEL 软件源，正在为您部署 EPEL 以便下载图形组件..."
+                    $PKG_MGR install -y epel-release || true
+                fi
             fi
-            ;;
-        3)
-            _log_info "正在为您安装 XFCE 桌面环境，此过程可能需要几分钟..."
-            if [ "$DISTRO_FAMILY" = "redhat" ]; then
-                $PKG_MGR groupinstall -y "Xfce" || $PKG_MGR install -y xfce-desktop-environment
-            else
-                apt-get update && apt-get install -y xfce4 xfce4-goodies
-            fi
-            ;;
-        4)
-            _log_warn "跳过桌面环境安装，继续部署 VNC..."
-            return 0
-            ;;
-        *)
-            _log_info "已取消安装。"
-            exit 0
-            ;;
-    esac
+            $PKG_MGR groupinstall -y "Xfce" || $PKG_MGR install -y xfce-desktop-environment
+        elif [ "$DISTRO_FAMILY" = "debian" ]; then
+            apt-get update && apt-get install -y xfce4 xfce4-goodies
+        elif [ "$DISTRO_FAMILY" = "arch" ]; then
+            pacman -Sy --noconfirm xfce4 xfce4-goodies
+        elif [ "$DISTRO_FAMILY" = "alpine" ]; then
+            apk update && apk add xfce4 xfce4-screensaver dbus xf86-input-libinput
+        fi
+    elif [ "$gui_choice" = "4" ]; then
+        _log_warn "跳过桌面环境安装，继续部署 VNC..."
+        return 0
+    elif [ "$gui_choice" = "0" ]; then
+        _log_info "已取消安装。"
+        exit 0
+    else
+        _log_err "输入无效，已取消桌面自动配置。"
+    fi
 
     if [ $? -eq 0 ]; then
         _log_info "桌面环境部署成功！"
         # 设置系统默认启动到图形界面
         systemctl set-default graphical.target &>/dev/null || true
     else
-        _log_err "桌面环境部署失败，请检查系统 YUM/APT 源配置。"
+        _log_err "桌面环境部署失败，请检查系统 YUM/APT/Pacman/APK 源配置。"
         read -p "是否强制继续配置 VNC 服务? (y/N): " force_cont < /dev/tty
         if [[ ! "$force_cont" =~ ^[Yy]$ ]]; then
             exit 1
@@ -173,9 +209,17 @@ install_vnc_packages() {
     _log_info "正在安装 VNC 服务端 (TigerVNC)..."
     if [ "$DISTRO_FAMILY" = "redhat" ]; then
         $PKG_MGR install -y tigervnc-server tigervnc-server-module
-    else
+    elif [ "$DISTRO_FAMILY" = "debian" ]; then
         apt-get update
-        apt-get install -y tigervnc-standalone-server tigervnc-common
+        apt-get install -y tigervnc-standalone-server tigervnc-common dbus-x11
+    elif [ "$DISTRO_FAMILY" = "arch" ]; then
+        pacman -Sy --noconfirm tigervnc xorg-server
+    elif [ "$DISTRO_FAMILY" = "alpine" ]; then
+        apk update
+        apk add tigervnc dbus xvfb xorg-server
+    else
+        _log_err "该系统架构暂不支持自动下载 VNC 软件包，请先手动配置 vncserver 后再试。"
+        exit 1
     fi
 
     if ! command -v vncserver &>/dev/null; then
@@ -394,6 +438,8 @@ EOF
             # 极低概率下模板被删除，自动动态构建兼容性 Systemd Unit 文件
             _log_warn "未在系统路径中找到 VNC 启动模板，为您自动跨平台编译构建专有 Unit..."
             
+            local VNC_BIN=$(command -v vncserver)
+            VNC_BIN=${VNC_BIN:-/usr/bin/vncserver}
             local user_group=$(id -gn "$VNC_USER")
             cat > "$service_file" << EOF
 [Unit]
@@ -408,9 +454,9 @@ WorkingDirectory=${USER_HOME}
 
 PIDFile=${USER_HOME}/.vnc/%H:%i.pid
 
-ExecStartPre=-/usr/bin/vncserver -kill :%i > /dev/null 2>&1
-ExecStart=/usr/bin/vncserver :%i -geometry 1920x1080 -depth 24 -alwaysshared
-ExecStop=/usr/bin/vncserver -kill :%i
+ExecStartPre=-${VNC_BIN} -kill :%i > /dev/null 2>&1
+ExecStart=${VNC_BIN} :%i -geometry 1920x1080 -depth 24 -alwaysshared
+ExecStop=${VNC_BIN} -kill :%i
 
 [Install]
 WantedBy=multi-user.target
