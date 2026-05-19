@@ -88,22 +88,33 @@ vnc_show_running_panel() {
     if [ ${#instances[@]} -eq 0 ]; then
         echo -e " ${YELLOW}●${NC} 暂无任何配置完备的 VNC 实例。"
     else
-        printf "${BLUE}%-8s | %-12s | %-12s | %-15s | %-10s${NC}\n" "桌面号" "监听端口" "服务用户" "自启挂载状态" "当前运行态"
-        printf "${BLUE}%-8s | %-12s | %-12s | %-15s | %-10s${NC}\n" "--------" "------------" "------------" "---------------" "----------"
+        local header_line1=$(printf "${BLUE}%-8s | %-12s | %-12s | %-15s | %-10s${NC}\n" "桌面号" "监听端口" "服务用户" "自启挂载状态" "当前运行态")
+        local header_line2=$(printf "${BLUE}%-8s | %-12s | %-12s | %-15s | %-10s${NC}\n" "--------" "------------" "------------" "---------------" "----------")
+        echo -e "$header_line1"
+        echo -e "$header_line2"
         for inst in "${instances[@]}"; do
             local dnum=$(echo "$inst" | cut -d: -f1)
             local user=$(echo "$inst" | cut -d: -f2)
             local port=$((5900 + dnum))
             
             # 自启状态
-            local autostart="${RED}未启用${NC}"
-            systemctl is-enabled --quiet "vncserver@:${dnum}.service" 2>/dev/null && autostart="${GREEN}已启用${NC}"
+            local autostart="未启用"
+            local autostart_color="${RED}"
+            if systemctl is-enabled --quiet "vncserver@:${dnum}.service" 2>/dev/null; then
+                autostart="已启用"
+                autostart_color="${GREEN}"
+            fi
             
             # 运行状态
-            local runstate="${RED}已停止${NC}"
-            systemctl is-active --quiet "vncserver@:${dnum}.service" && runstate="${GREEN}活动中${NC}"
+            local runstate="已停止"
+            local runstate_color="${RED}"
+            if systemctl is-active --quiet "vncserver@:${dnum}.service" 2>/dev/null; then
+                runstate="活动中"
+                runstate_color="${GREEN}"
+            fi
             
-            printf "%-8s | %-12s | %-12s | %-15s | %-10s\n" ":$dnum" "$port" "$user" "$autostart" "$runstate"
+            local line_str=$(printf "%-8s | %-12s | %-12s | ${autostart_color}%-15s${NC} | ${runstate_color}%-10s${NC}\n" ":$dnum" "$port" "$user" "$autostart" "$runstate")
+            echo -e "$line_str"
         done
     fi
     
