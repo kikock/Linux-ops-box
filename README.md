@@ -8,6 +8,7 @@
 - **完全解耦的架构**: 主程序仅 200 行负责 TUI 菜单分发，各类功能下沉至 `modules/` 子模块，互不干扰。
 - **透明审计**: 所有状态输出通过专门的日志基座 `common.sh`，实现控制台高亮输出与 `/var/log/ck_system_init.log` 原文存档双写。
 - **独立专家级工具**: 为高频组件（如 Docker/VPN/代理）提供完全独立的、具备实时版本采集能力的安装与管理脚本。
+- **无损热升级与环境自愈**: 系统在线升级自动开启本地配置与历史备份文件热迁移，内置 crontab 定时任务与 JSON 管理器双向同步及失效清理机制，确保数据资产安全。
 
 ---
 
@@ -136,11 +137,14 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 
 > **版本**: v2.1 | 工具入口 Banner 为 `数据库管理工具 v2.1 — MySQL / PostgreSQL 备份恢复管理`
 
-### 目录结构:
+### 目录结构与数据持久化:
 
-```
+- **备份路径下沉**: 默认备份及归档文件统一下沉持久化至外部独立目录 `/opt/backups/`，确保跨版本更新时数据完全安全，并支持老版本数据的平滑自动搬迁。
+- **定时任务双向同步**: 物理 `crontab` 任务记录与本地 JSON 管理器支持热加载并自动双向对齐，极大程度避免历史定时策略遗失。
+
+```text
 system/db_manager/
-├── db_mgmt.sh           # 核心引擎 (v2.1，~1637行)
+├── db_mgmt.sh           # 核心引擎 (v2.1+)
 ├── .env.db              # 全局配置 (备份目录/压缩策略/保留数量)
 ├── db_connections.json  # 多连接配置持久化存储
 └── archive_rules.json   # 数据表归档规则持久化存储 (自动生成)
@@ -266,7 +270,7 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 ### 📅 近期目标 (v2.x)
 
 - [ ] **运维告警集成**: 支持 Telegram / 钉钉 / 飞书 机器人推送系统关键指标异常告警。
-- [x] **数据库管理中心**: ✅ MySQL / PostgreSQL TUI 管理（v2.0 已落地，含 Docker 容器模式、定时备份、多连接管理）。
+- [x] **数据库管理中心**: ✅ MySQL / PostgreSQL TUI 管理（v2.1 已落地，含 Docker 容器模式、定时备份、多连接管理、数据表自动化归档）。
 - [ ] **SSL 证书管家**: 集成 `acme.sh` 的全量生命周期管理，支持自动化 DNS-01 验证。
 - [ ] **Redis 管理扩展**: 基于数据库管理中心框架，扩展 Redis 键值浏览与 RDB/AOF 备份支持。
 
