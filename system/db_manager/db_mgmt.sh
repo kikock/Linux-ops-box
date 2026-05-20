@@ -26,6 +26,7 @@ BACKUP_COMPRESS="${BACKUP_COMPRESS:-gzip}"
 BACKUP_PREFIX="${BACKUP_PREFIX:-db_backup}"
 DB_CONFIG_FILE="${DB_CONFIG_FILE:-$CONFIG_FILE}"
 ARCHIVE_CONFIG="${ARCHIVE_CONFIG:-$SCRIPT_DIR/archive_rules.json}"
+CRON_CONFIG="${CRON_CONFIG:-$SCRIPT_DIR/cron_tasks.json}"
 
 # ── Docker 模式辅助函数 ───────────────────────────────────────────
 # 连接信息全局变量（由 select_connection 填充）
@@ -113,6 +114,9 @@ init_config() {
     if [ ! -f "$DB_CONFIG_FILE" ]; then
         echo "[]" > "$DB_CONFIG_FILE"
         log_info "已创建空配置文件: $DB_CONFIG_FILE"
+    fi
+    if [ ! -f "$CRON_CONFIG" ]; then
+        echo "[]" > "$CRON_CONFIG"
     fi
     mkdir -p "$BACKUP_DIR"
 }
@@ -822,40 +826,84 @@ cron_add() {
 
     # 写入 crontab
     (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab -
+
+    # 写入 JSON 配置文件
+    local task_id; task_id="task_$(date +%s%N 2>/dev/null || date +%s)"
+    local new_task; new_task=$(jq -n \
+        --arg id "$task_id" \
+        --arg type "backup" \
+        --argjson conn_idx "$SELECTED_IDX" \
+        --arg conn_alias "$SELECTED_ALIAS" \
+        --arg database "$db_arg" \
+        --arg cron_expr "$cron_expr" \
+        --arg cron_cmd "$cron_cmd" \
+        '{id:$id,type:$type,conn_idx:$conn_idx,conn_alias:$conn_alias,database:$database,cron_expr:$cron_expr,cron_cmd:$cron_cmd}')
+    local tmp; tmp=$(mktemp)
+    jq --argjson t "$new_task" '. += [$t]' "$CRON_CONFIG" > "$tmp" && mv "$tmp" "$CRON_CONFIG"
+
     log_info "定时任务已添加: $cron_expr"
     log_info "任务: [$SELECTED_ALIAS] 备份 $db_arg"
 }
 
 cron_list() {
     log_title "当前定时备份任务"
-    local script_name; script_name=$(basename "$0")
-    local tasks; tasks=$(crontab -l 2>/dev/null | grep "$script_name --cron-backup")
-    if [ -z "$tasks" ]; then
+    if [ ! -f "$CRON_CONFIG" ]; then
+        log_warn "暂无定时备份任务"
+        press_enter; return
+    fi
+    local count; count=$(jq '[.[] | select(.type == "backup")] | length' "$CRON_CONFIG")
+    if [ "$count" -eq 0 ]; then
         log_warn "暂无定时备份任务"
     else
-        echo "$tasks"
+        echo -e "  ${BOLD}$(printf '%-6s %-15s %-20s %-15s' "序号" "连接别名" "目标数据库" "执行周期")${NC}"
+        echo -e "  ${CYAN}$(printf '─%.0s' {1..60})${NC}"
+        local i=0
+        while [ $i -lt "$count" ]; do
+            local alias db expr
+            alias=$(jq -r "[.[] | select(.type == \"backup\")][$i].conn_alias" "$CRON_CONFIG")
+            db=$(jq -r "[.[] | select(.type == \"backup\")][$i].database" "$CRON_CONFIG")
+            expr=$(jq -r "[.[] | select(.type == \"backup\")][$i].cron_expr" "$CRON_CONFIG")
+            echo -e "  $(printf '[%d]    %-15s %-20s %-15s' "$i" "$alias" "$db" "$expr")"
+            ((i++))
+        done
     fi
     press_enter
 }
 
 cron_delete() {
     log_title "删除定时备份任务"
-    local script_name; script_name=$(basename "$0")
-    local tasks; tasks=$(crontab -l 2>/dev/null | grep "$script_name --cron-backup")
-    if [ -z "$tasks" ]; then log_warn "暂无任务"; press_enter; return; fi
+    if [ ! -f "$CRON_CONFIG" ]; then log_warn "暂无任务"; press_enter; return; fi
+    local count; count=$(jq '[.[] | select(.type == "backup")] | length' "$CRON_CONFIG")
+    if [ "$count" -eq 0 ]; then log_warn "暂无任务"; press_enter; return; fi
 
-    local i=0; declare -A cron_map
-    while IFS= read -r line; do
-        echo -e "  ${GREEN}[$i]${NC} $line"; cron_map[$i]="$line"; ((i++))
-    done <<< "$tasks"
+    local i=0
+    while [ $i -lt "$count" ]; do
+        local alias db expr
+        alias=$(jq -r "[.[] | select(.type == \"backup\")][$i].conn_alias" "$CRON_CONFIG")
+        db=$(jq -r "[.[] | select(.type == \"backup\")][$i].database" "$CRON_CONFIG")
+        expr=$(jq -r "[.[] | select(.type == \"backup\")][$i].cron_expr" "$CRON_CONFIG")
+        echo -e "  ${GREEN}[$i]${NC} 连接: $alias | 库: $db | 周期: $expr"
+        ((i++))
+    done
 
     read -rp "请选择要删除的任务序号: " sel
-    local target="${cron_map[$sel]}"
-    [ -z "$target" ] && { log_error "无效序号"; return; }
+    if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -ge "$count" ]; then
+        log_error "无效序号"; return
+    fi
 
-    local escaped; escaped=$(printf '%s\n' "$target" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    local task_id cron_cmd
+    task_id=$(jq -r "[.[] | select(.type == \"backup\")][$sel].id" "$CRON_CONFIG")
+    cron_cmd=$(jq -r "[.[] | select(.type == \"backup\")][$sel].cron_cmd" "$CRON_CONFIG")
+
+    # 1. 从 crontab 中删除
+    local escaped; escaped=$(printf '%s\n' "$cron_cmd" | sed 's/[[\.*^$()+?{|]/\\&/g')
     crontab -l 2>/dev/null | grep -v "$escaped" | crontab -
-    log_info "任务已删除"
+
+    # 2. 从 JSON 配置文件中删除
+    local tmp; tmp=$(mktemp)
+    jq "del(.[] | select(.id == \"$task_id\"))" "$CRON_CONFIG" > "$tmp" && mv "$tmp" "$CRON_CONFIG"
+
+    log_info "定时备份任务已删除"
     press_enter
 }
 
@@ -1598,33 +1646,88 @@ archive_cron_add() {
     local script_path; script_path=$(realpath "$0")
     local cron_cmd="$cron_expr bash $script_path --cron-archive \"$rule_arg\" >> $BACKUP_DIR/archive.log 2>&1"
     (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab -
+
+    # 写入 JSON 配置文件
+    local task_id; task_id="task_$(date +%s%N 2>/dev/null || date +%s)"
+    local rule_name; rule_name="全部归档规则"
+    if [ "$rule_arg" != "__ALL__" ]; then
+        rule_name=$(jq -r ".[$rule_arg].name" "$ARCHIVE_CONFIG" 2>/dev/null)
+    fi
+    local new_task; new_task=$(jq -n \
+        --arg id "$task_id" \
+        --arg type "archive" \
+        --arg rule_arg "$rule_arg" \
+        --arg rule_name "$rule_name" \
+        --arg cron_expr "$cron_expr" \
+        --arg cron_cmd "$cron_cmd" \
+        '{id:$id,type:$type,rule_arg:$rule_arg,rule_name:$rule_name,cron_expr:$cron_expr,cron_cmd:$cron_cmd}')
+    local tmp; tmp=$(mktemp)
+    jq --argjson t "$new_task" '. += [$t]' "$CRON_CONFIG" > "$tmp" && mv "$tmp" "$CRON_CONFIG"
+
     log_info "归档定时任务已添加: $cron_expr | 规则: $rule_arg"
 }
 
 archive_cron_list() {
-    log_title "归档定时任务"
-    local script_name; script_name=$(basename "$0")
-    local tasks; tasks=$(crontab -l 2>/dev/null | grep "$script_name --cron-archive")
-    [ -z "$tasks" ] && { log_warn "暂无归档定时任务"; press_enter; return; }
-    echo "$tasks"
+    log_title "当前定时归档任务"
+    if [ ! -f "$CRON_CONFIG" ]; then
+        log_warn "暂无定时归档任务"
+        press_enter; return
+    fi
+    local count; count=$(jq '[.[] | select(.type == "archive")] | length' "$CRON_CONFIG")
+    if [ "$count" -eq 0 ]; then
+        log_warn "暂无定时归档任务"
+    else
+        echo -e "  ${BOLD}$(printf '%-6s %-25s %-15s' "序号" "规则名称 (规则序号)" "执行周期")${NC}"
+        echo -e "  ${CYAN}$(printf '─%.0s' {1..50})${NC}"
+        local i=0
+        while [ $i -lt "$count" ]; do
+            local name rarg expr
+            name=$(jq -r "[.[] | select(.type == \"archive\")][$i].rule_name" "$CRON_CONFIG")
+            rarg=$(jq -r "[.[] | select(.type == \"archive\")][$i].rule_arg" "$CRON_CONFIG")
+            expr=$(jq -r "[.[] | select(.type == \"archive\")][$i].cron_expr" "$CRON_CONFIG")
+            [ "$rarg" = "__ALL__" ] && name="全部归档规则"
+            echo -e "  $(printf '[%d]    %-25s %-15s' "$i" "$name ($rarg)" "$expr")"
+            ((i++))
+        done
+    fi
     press_enter
 }
 
 archive_cron_delete() {
-    log_title "删除归档定时任务"
-    local script_name; script_name=$(basename "$0")
-    local tasks; tasks=$(crontab -l 2>/dev/null | grep "$script_name --cron-archive")
-    [ -z "$tasks" ] && { log_warn "暂无任务"; press_enter; return; }
-    local i=0; declare -A amap
-    while IFS= read -r line; do
-        echo -e "  ${GREEN}[$i]${NC} $line"; amap[$i]="$line"; ((i++))
-    done <<< "$tasks"
+    log_title "删除定时归档任务"
+    if [ ! -f "$CRON_CONFIG" ]; then log_warn "暂无任务"; press_enter; return; fi
+    local count; count=$(jq '[.[] | select(.type == "archive")] | length' "$CRON_CONFIG")
+    if [ "$count" -eq 0 ]; then log_warn "暂无任务"; press_enter; return; fi
+
+    local i=0
+    while [ $i -lt "$count" ]; do
+        local name rarg expr
+        name=$(jq -r "[.[] | select(.type == \"archive\")][$i].rule_name" "$CRON_CONFIG")
+        rarg=$(jq -r "[.[] | select(.type == \"archive\")][$i].rule_arg" "$CRON_CONFIG")
+        expr=$(jq -r "[.[] | select(.type == \"archive\")][$i].cron_expr" "$CRON_CONFIG")
+        [ "$rarg" = "__ALL__" ] && name="全部归档规则"
+        echo -e "  ${GREEN}[$i]${NC} 规则: $name ($rarg) | 周期: $expr"
+        ((i++))
+    done
+
     read -rp "请选择要删除的序号: " sel
-    local target="${amap[$sel]:-}"
-    [ -z "$target" ] && { log_error "无效序号"; return; }
-    local escaped; escaped=$(printf '%s\n' "$target" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -ge "$count" ]; then
+        log_error "无效序号"; return
+    fi
+
+    local task_id cron_cmd
+    task_id=$(jq -r "[.[] | select(.type == \"archive\")][$sel].id" "$CRON_CONFIG")
+    cron_cmd=$(jq -r "[.[] | select(.type == \"archive\")][$sel].cron_cmd" "$CRON_CONFIG")
+
+    # 1. 从 crontab 中删除
+    local escaped; escaped=$(printf '%s\n' "$cron_cmd" | sed 's/[[\.*^$()+?{|]/\\&/g')
     crontab -l 2>/dev/null | grep -v "$escaped" | crontab -
-    log_info "归档任务已删除"
+
+    # 2. 从 JSON 配置文件中删除
+    local tmp; tmp=$(mktemp)
+    jq "del(.[] | select(.id == \"$task_id\"))" "$CRON_CONFIG" > "$tmp" && mv "$tmp" "$CRON_CONFIG"
+
+    log_info "定时归档任务已删除"
     press_enter
 }
 
