@@ -798,10 +798,13 @@ cron_add() {
     echo -e "\n备份频率:"
     echo -e "  ${GREEN}[1]${NC} 每天定时"
     echo -e "  ${GREEN}[2]${NC} 每周定时"
-    echo -e "  ${GREEN}[3]${NC} 自定义 cron 表达式"
-    read -rp "请选择: " freq
+    echo -e "  ${GREEN}[3]${NC} 每月定时"
+    echo -e "  ${GREEN}[4]${NC} 每几个月定时"
+    echo -e "  ${GREEN}[5]${NC} 每几年定时"
+    echo -e "  ${GREEN}[6]${NC} 自定义 cron 表达式"
+    read -rp "请选择 [1-6]: " freq
 
-    local cron_expr
+    local cron_expr start_yr yrs mon dom hr
     case "$freq" in
         1)
             read -rp "每天几点备份 [0-23，默认2]: " hr; hr="${hr:-2}"
@@ -814,6 +817,25 @@ cron_add() {
             cron_expr="0 $hr * * $wd"
             ;;
         3)
+            read -rp "每月几号备份 [1-31，默认1]: " dom; dom="${dom:-1}"
+            read -rp "几点备份 [0-23，默认2]: " hr; hr="${hr:-2}"
+            cron_expr="0 $hr $dom * *"
+            ;;
+        4)
+            read -rp "每隔几个月备份 [1-12，默认3]: " mos; mos="${mos:-3}"
+            read -rp "每月几号备份 [1-31，默认1]: " dom; dom="${dom:-1}"
+            read -rp "几点备份 [0-23，默认2]: " hr; hr="${hr:-2}"
+            cron_expr="0 $hr $dom */$mos *"
+            ;;
+        5)
+            read -rp "每隔几年备份 [默认1]: " yrs; yrs="${yrs:-1}"
+            read -rp "几月备份 [1-12，默认1]: " mon; mon="${mon:-1}"
+            read -rp "几号备份 [1-31，默认1]: " dom; dom="${dom:-1}"
+            read -rp "几点备份 [0-23，默认2]: " hr; hr="${hr:-2}"
+            start_yr=$(date +%Y)
+            cron_expr="0 $hr $dom $mon * (每 $yrs 年, 基准 $start_yr)"
+            ;;
+        6)
             read -rp "请输入 cron 表达式 (分 时 日 月 周): " cron_expr
             ;;
         *) log_error "无效选择"; return ;;
@@ -822,7 +844,14 @@ cron_add() {
     # 生成 cron 命令
     local script_path; script_path=$(realpath "$0")
     local db_arg="$target_db"
-    local cron_cmd="$cron_expr bash $script_path --cron-backup $SELECTED_IDX \"$db_arg\" >> $BACKUP_DIR/cron.log 2>&1"
+    local real_cron_expr="$cron_expr"
+    local cron_cmd
+    if [ "$freq" = "5" ]; then
+        real_cron_expr="0 $hr $dom $mon *"
+        cron_cmd="$real_cron_expr [ \$(( ( \$(date +\%Y) - $start_yr ) \% $yrs )) -eq 0 ] && bash $script_path --cron-backup $SELECTED_IDX \"$db_arg\" >> $BACKUP_DIR/cron.log 2>&1"
+    else
+        cron_cmd="$cron_expr bash $script_path --cron-backup $SELECTED_IDX \"$db_arg\" >> $BACKUP_DIR/cron.log 2>&1"
+    fi
 
     # 写入 crontab
     (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab -
@@ -1669,21 +1698,60 @@ archive_cron_add() {
         log_error "无效序号"; return
     fi
 
-    echo -e "\n执行频率:\n  ${GREEN}[1]${NC} 每天定时  ${GREEN}[2]${NC} 每周定时  ${GREEN}[3]${NC} 自定义 cron"
-    read -rp "选择: " freq
-    local cron_expr
+    echo -e "\n执行频率:"
+    echo -e "  ${GREEN}[1]${NC} 每天定时"
+    echo -e "  ${GREEN}[2]${NC} 每周定时"
+    echo -e "  ${GREEN}[3]${NC} 每月定时"
+    echo -e "  ${GREEN}[4]${NC} 每几个月定时"
+    echo -e "  ${GREEN}[5]${NC} 每几年定时"
+    echo -e "  ${GREEN}[6]${NC} 自定义 cron 表达式"
+    read -rp "请选择 [1-6]: " freq
+
+    local cron_expr start_yr yrs mon dom hr
     case "$freq" in
-        1) read -rp "几点执行 [0-23, 默认3]: " hr; hr="${hr:-3}"
-           cron_expr="0 $hr * * *" ;;
-        2) read -rp "星期几 [0=周日..6=周六, 默认0]: " wd; wd="${wd:-0}"
-           read -rp "几点 [默认3]: " hr; hr="${hr:-3}"
-           cron_expr="0 $hr * * $wd" ;;
-        3) read -rp "cron 表达式 (分 时 日 月 周): " cron_expr ;;
+        1)
+            read -rp "几点执行 [0-23, 默认3]: " hr; hr="${hr:-3}"
+            cron_expr="0 $hr * * *"
+            ;;
+        2)
+            read -rp "星期几 [0=周日..6=周六, 默认0]: " wd; wd="${wd:-0}"
+            read -rp "几点 [默认3]: " hr; hr="${hr:-3}"
+            cron_expr="0 $hr * * $wd"
+            ;;
+        3)
+            read -rp "每月几号执行 [1-31, 默认1]: " dom; dom="${dom:-1}"
+            read -rp "几点执行 [0-23, 默认3]: " hr; hr="${hr:-3}"
+            cron_expr="0 $hr $dom * *"
+            ;;
+        4)
+            read -rp "每隔几个月执行 [1-12, 默认3]: " mos; mos="${mos:-3}"
+            read -rp "每月几号执行 [1-31, 默认1]: " dom; dom="${dom:-1}"
+            read -rp "几点执行 [0-23, 默认3]: " hr; hr="${hr:-3}"
+            cron_expr="0 $hr $dom */$mos *"
+            ;;
+        5)
+            read -rp "每隔几年执行 [默认1]: " yrs; yrs="${yrs:-1}"
+            read -rp "几月执行 [1-12, 默认1]: " mon; mon="${mon:-1}"
+            read -rp "几号执行 [1-31, 默认1]: " dom; dom="${dom:-1}"
+            read -rp "几点执行 [0-23, 默认3]: " hr; hr="${hr:-3}"
+            start_yr=$(date +%Y)
+            cron_expr="0 $hr $dom $mon * (每 $yrs 年, 基准 $start_yr)"
+            ;;
+        6)
+            read -rp "cron 表达式 (分 时 日 月 周): " cron_expr
+            ;;
         *) log_error "无效选择"; return ;;
     esac
 
     local script_path; script_path=$(realpath "$0")
-    local cron_cmd="$cron_expr bash $script_path --cron-archive \"$rule_arg\" >> $BACKUP_DIR/archive.log 2>&1"
+    local real_cron_expr="$cron_expr"
+    local cron_cmd
+    if [ "$freq" = "5" ]; then
+        real_cron_expr="0 $hr $dom $mon *"
+        cron_cmd="$real_cron_expr [ \$(( ( \$(date +\%Y) - $start_yr ) \% $yrs )) -eq 0 ] && bash $script_path --cron-archive \"$rule_arg\" >> $BACKUP_DIR/archive.log 2>&1"
+    else
+        cron_cmd="$cron_expr bash $script_path --cron-archive \"$rule_arg\" >> $BACKUP_DIR/archive.log 2>&1"
+    fi
     (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab -
 
     # 写入 JSON 配置文件
