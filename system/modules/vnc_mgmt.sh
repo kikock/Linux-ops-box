@@ -56,10 +56,19 @@ vnc_install_instance() {
         _log_err "未找到 VNC 独立安装脚本，正在尝试一键云端拉取..."
         # 兼容云端拉取 (根据 repository 自适应)
         local GH_MIRROR="https://github.com"
-        if command -v curl &>/dev/null; then
-            if ! curl -Is -m 3 "https://github.com" | head -1 | grep -q '200\|301\|302'; then
-                GH_MIRROR="https://ghproxy.net/https://github.com"
+        if [ -n "$LINUX_OPS_BOX_PROXY" ]; then
+            if [ "$LINUX_OPS_BOX_PROXY" = "https://github.com" ]; then
+                GH_MIRROR="https://github.com"
+            else
+                GH_MIRROR="${LINUX_OPS_BOX_PROXY%/}/https://github.com"
             fi
+        else
+            if command -v curl &>/dev/null; then
+                if ! curl -Is -m 3 "https://github.com" | head -1 | grep -q '200\|301\|302'; then
+                    GH_MIRROR="https://ghproxy.net/https://github.com"
+                fi
+            fi
+        fi
             curl -fsSL -o /tmp/install_vnc.sh "${GH_MIRROR}/kikock/Linux-ops-box/raw/main/install_vnc.sh"
         else
             _log_err "缺少 curl 工具，无法自动云端安装。"

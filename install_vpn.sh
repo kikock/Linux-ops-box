@@ -45,10 +45,18 @@ XRAY_ARCH="64"
 # 私有辅助函数: Github 线路自适应探测
 # ================================================================
 _get_gh_mirror() {
-    if curl -Is -m 3 "https://github.com" | head -1 | grep -q '200\|301\|302'; then
-        echo "https://github.com"
+    if [ -n "$LINUX_OPS_BOX_PROXY" ]; then
+        if [ "$LINUX_OPS_BOX_PROXY" = "https://github.com" ]; then
+            echo "https://github.com"
+        else
+            echo "${LINUX_OPS_BOX_PROXY%/}/https://github.com"
+        fi
     else
-        echo "https://ghproxy.net/https://github.com"
+        if curl -Is -m 3 "https://github.com" | head -1 | grep -q '200\|301\|302'; then
+            echo "https://github.com"
+        else
+            echo "https://ghproxy.net/https://github.com"
+        fi
     fi
 }
 

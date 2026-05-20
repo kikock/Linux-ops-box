@@ -82,25 +82,66 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
     
     # 动态探测并自适应 Github 访问路线
     GH_MIRROR="https://github.com"
-    echo -e "  ⏳ 正在探测 Github 官方直连可用性..."
     
-    # 连通性探测：使用 3秒超时 尝试访问目标仓库
-    if command -v curl &>/dev/null; then
-        if curl -Is -m 3 "https://github.com/kikock/Linux-ops-box" | head -1 | grep -qE 'HTTP/.*(200|301|302)'; then
-            echo -e "${GREEN}  ✓ Github 官方通道顺畅，已启用直连模式。${NC}"
+    if [ -n "$LINUX_OPS_BOX_PROXY" ]; then
+        if [ "$LINUX_OPS_BOX_PROXY" = "https://github.com" ]; then
+            GH_MIRROR="https://github.com"
         else
-            echo -e "${YELLOW}  ⚠ Github 直连受阻或超时，自动为您切换国内加速镜像池 (ghproxy.net)...${NC}"
-            GH_MIRROR="https://ghproxy.net/https://github.com"
+            GH_MIRROR="${LINUX_OPS_BOX_PROXY%/}/https://github.com"
         fi
-    elif command -v wget &>/dev/null; then
-        if wget --spider -q -T 3 "https://github.com/kikock/Linux-ops-box"; then
-            echo -e "${GREEN}  ✓ Github 官方通道顺畅，已启用直连模式。${NC}"
-        else
-            echo -e "${YELLOW}  ⚠ Github 直连受阻或超时，自动为您切换国内加速镜像池 (ghproxy.net)...${NC}"
-            GH_MIRROR="https://ghproxy.net/https://github.com"
-        fi
+        echo -e "${GREEN}  ✓ 已继承更新程序指定的下载通道: ${GH_MIRROR}${NC}"
     else
-        GH_MIRROR="https://ghproxy.net/https://github.com"
+        echo -e "  ⏳ 正在探测 Github 官方直连可用性..."
+        local is_direct_ok=false
+        if command -v curl &>/dev/null; then
+            if curl -Is -m 2 "https://github.com/kikock/Linux-ops-box" | head -1 | grep -qE 'HTTP/.*(200|301|302)'; then
+                is_direct_ok=true
+            fi
+        elif command -v wget &>/dev/null; then
+            if wget --spider -q -T 2 "https://github.com/kikock/Linux-ops-box" &>/dev/null; then
+                is_direct_ok=true
+            fi
+        fi
+
+        if [ "$is_direct_ok" = "true" ]; then
+            echo -e "${GREEN}  ✓ Github 官方通道顺畅，已启用直连模式。${NC}"
+        else
+            echo -e "${YELLOW}  ⚠ Github 直连受阻，正在智能探测并分配国内可用加速通道...${NC}"
+            local candidates=(
+                "https://ghproxy.net"
+                "https://mirror.ghproxy.com"
+                "https://gh-proxy.com"
+            )
+            local matched=false
+            for candidate in "${candidates[@]}"; do
+                echo -n "     ➜ 测试加速通道 [${candidate}] ... "
+                local check_url="${candidate}/https://github.com/kikock/Linux-ops-box"
+                local reachable=false
+                if command -v curl &>/dev/null; then
+                    if curl -Is -m 2 "$check_url" &>/dev/null; then
+                        reachable=true
+                    fi
+                elif command -v wget &>/dev/null; then
+                    if wget --spider -q -T 2 "$check_url" &>/dev/null; then
+                        reachable=true
+                    fi
+                fi
+                
+                if [ "$reachable" = "true" ]; then
+                    echo -e "${GREEN}正常可用${NC}"
+                    GH_MIRROR="${candidate}/https://github.com"
+                    matched=true
+                    break
+                else
+                    echo -e "${RED}不可用${NC}"
+                fi
+            done
+            
+            if [ "$matched" = "false" ]; then
+                echo -e "${RED}  ❌ 警告: 所有内置国内加速源均无法连通，将回退至默认加速源进行尝试。${NC}"
+                GH_MIRROR="https://ghproxy.net/https://github.com"
+            fi
+        fi
     fi
 
     TAR_URL="$GH_MIRROR/kikock/Linux-ops-box/archive/refs/heads/${REPO_BRANCH}.tar.gz"

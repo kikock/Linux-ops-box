@@ -121,71 +121,206 @@ _draw_menu_header() {
 }
 
 # ================================================================
+# 辅助函数: 测试代理源下载速度与连通性 (超时 2 秒)
+# ================================================================
+_test_proxy_speed() {
+    local url="$1"
+    if command -v curl &>/dev/null; then
+        local score
+        score=$(curl -o /dev/null -s -w "%{time_total}\n" -m 2 -I "$url" || echo "9.999")
+        if [ "$score" != "9.999" ]; then
+            local clean_score=$(echo "$score" | tr -d '.')
+            clean_score=$(echo "$clean_score" | sed 's/^0*//')
+            [ -z "$clean_score" ] && clean_score=0
+            echo "$clean_score"
+            return 0
+        fi
+    elif command -v wget &>/dev/null; then
+        local start_t end_t
+        start_t=$(date +%s)
+        if wget --spider -q -T 2 "$url" &>/dev/null; then
+            end_t=$(date +%s)
+            local diff=$(( (end_t - start_t) * 1000 ))
+            [ $diff -eq 0 ] && diff=150
+            echo "$diff"
+            return 0
+        fi
+    fi
+    echo "9999"
+    return 1
+}
+
+# ================================================================
 # 工具箱在线更新函数
 # ================================================================
 _update_toolbox() {
-    clear
-    echo -e "${CYAN}======================================================${NC}"
-    echo -e "${CYAN}          Linux-ops-box 在线更新程序                  ${NC}"
-    echo -e "${CYAN}======================================================${NC}"
-    echo -e "  ⏳ 正在探测最佳下载通道..."
+    local PROXIES=(
+        "https://github.com"
+        "https://ghproxy.net"
+        "https://mirror.ghproxy.com"
+        "https://gh-proxy.com"
+    )
+    local PROXY_NAMES=(
+        "🌐 GitHub 官方直连 (https://github.com)"
+        "🚀 加速通道 A: GHProxy.net (国内推荐)"
+        "🚀 加速通道 B: Mirror.ghproxy.com (备用)"
+        "🚀 加速通道 C: GH-proxy.com (备用)"
+    )
 
-    # 探测 GitHub 直连可用性，自动切换镜像
-    local GH_MIRROR="https://github.com"
-    if command -v curl &>/dev/null; then
-        if ! curl -Is -m 5 "https://github.com/kikock/Linux-ops-box" | head -1 | grep -qE 'HTTP/.*(200|301|302)'; then
-            echo -e "${YELLOW}  ⚠ GitHub 直连受阻，自动切换国内加速镜像...${NC}"
-            GH_MIRROR="https://ghproxy.net/https://github.com"
-        else
-            echo -e "${GREEN}  ✓ GitHub 官方通道顺畅，已启用直连模式。${NC}"
-        fi
-    elif command -v wget &>/dev/null; then
-        if ! wget --spider -q -T 5 "https://github.com/kikock/Linux-ops-box" 2>/dev/null; then
-            echo -e "${YELLOW}  ⚠ GitHub 直连受阻，自动切换国内加速镜像...${NC}"
-            GH_MIRROR="https://ghproxy.net/https://github.com"
-        else
-            echo -e "${GREEN}  ✓ GitHub 官方通道顺畅，已启用直连模式。${NC}"
-        fi
-    else
+    if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
+        clear
         echo -e "${RED}  ✗ 系统缺少 curl 和 wget，无法在线更新！${NC}"
         echo -e "  请先安装 curl: apt install curl  或  yum install curl"
         read -p "  按任意键返回菜单..." -n1 < /dev/tty
         return
     fi
 
-    local INSTALL_URL="${GH_MIRROR}/kikock/Linux-ops-box/raw/main/install_system.sh"
-    echo -e "  ➜ 下载源: ${CYAN}${INSTALL_URL}${NC}"
-    echo -e "  ⏳ 正在下载最新安装器，请稍候..."
+    local CHOSEN_PROXY=""
+    
+    while true; do
+        clear
+        echo -e "${CYAN}======================================================${NC}"
+        echo -e "${CYAN}          Linux-ops-box 在线更新配置                  ${NC}"
+        echo -e "${CYAN}======================================================${NC}"
+        echo -e "请选择 GitHub 下载源/加速代理通道："
+        echo -e " 1. ⚡ 智能自动探测最佳通道 (推荐)"
+        echo -e " 2. ${PROXY_NAMES[0]}"
+        echo -e " 3. ${PROXY_NAMES[1]}"
+        echo -e " 4. ${PROXY_NAMES[2]}"
+        echo -e " 5. ${PROXY_NAMES[3]}"
+        echo -e " 6. ✏️  手动输入自定义加速前缀"
+        echo -e " 0. ↩ 返回主菜单"
+        echo -e "${CYAN}======================================================${NC}"
+        read -p "请输入选项 [0-6]: " proxy_choice < /dev/tty
 
-    local TMP_INSTALLER="/tmp/ops_box_updater_$$.sh"
+        case $proxy_choice in
+            1)
+                echo -e "\n⏳ 正在动态探测各通道延迟，请稍候..."
+                local min_latency=9999
+                local best_idx=0
+                
+                for i in "${!PROXIES[@]}"; do
+                    local test_url
+                    if [ "${PROXIES[$i]}" = "https://github.com" ]; then
+                        test_url="https://github.com/kikock/Linux-ops-box"
+                    else
+                        test_url="${PROXIES[$i]}/https://github.com/kikock/Linux-ops-box"
+                    fi
+                    
+                    echo -n "   ➜ 正在测试 [${PROXY_NAMES[$i]}] ... "
+                    local latency
+                    latency=$(_test_proxy_speed "$test_url")
+                    
+                    if [ "$latency" -lt 9999 ]; then
+                        echo -e "${GREEN}${latency} ms${NC}"
+                        if [ "$latency" -lt "$min_latency" ]; then
+                            min_latency=$latency
+                            best_idx=$i
+                        fi
+                    else
+                        echo -e "${RED}连接超时/不可用${NC}"
+                    fi
+                done
+                
+                if [ "$min_latency" -eq 9999 ]; then
+                    echo -e "\n${RED}❌ 所有预设通道均无法连接！建议手动输入自定义代理或检查网络。${NC}"
+                    read -p "按任意键重新选择..." -n1 < /dev/tty
+                    continue
+                else
+                    CHOSEN_PROXY="${PROXIES[$best_idx]}"
+                    echo -e "\n${GREEN}✓ 自动探测完成！已选择最佳通道: [${PROXY_NAMES[$best_idx]}] (延迟 ${min_latency} ms)${NC}"
+                    sleep 1.5
+                fi
+                ;;
+            2) CHOSEN_PROXY="${PROXIES[0]}" ;;
+            3) CHOSEN_PROXY="${PROXIES[1]}" ;;
+            4) CHOSEN_PROXY="${PROXIES[2]}" ;;
+            5) CHOSEN_PROXY="${PROXIES[3]}" ;;
+            6)
+                echo -e "\n请输入您的自定义 GitHub 加速前缀（如 https://github.akams.cn/）："
+                read -p "前缀 URL: " custom_prefix < /dev/tty
+                if [ -z "$custom_prefix" ]; then
+                    echo -e "${RED}输入不能为空！${NC}"
+                    sleep 1
+                    continue
+                fi
+                if [[ ! "$custom_prefix" =~ ^https?:// ]]; then
+                    echo -e "${RED}格式错误：必须以 http:// 或 https:// 开头！${NC}"
+                    sleep 1.5
+                    continue
+                fi
+                CHOSEN_PROXY="$custom_prefix"
+                ;;
+            0) return ;;
+            *) echo -e "${RED}输入无效，请重新选择。${NC}"; sleep 1; continue ;;
+        esac
 
-    if command -v curl &>/dev/null; then
-        curl -fsSL -o "${TMP_INSTALLER}" "${INSTALL_URL}"
-    else
-        wget -qO "${TMP_INSTALLER}" "${INSTALL_URL}"
-    fi
+        local FINAL_URL
+        if [ "$CHOSEN_PROXY" = "https://github.com" ]; then
+            FINAL_URL="https://github.com/kikock/Linux-ops-box/raw/main/install_system.sh"
+        else
+            FINAL_URL="${CHOSEN_PROXY%/}/https://github.com/kikock/Linux-ops-box/raw/main/install_system.sh"
+        fi
 
-    if [ ! -f "${TMP_INSTALLER}" ] || [ ! -s "${TMP_INSTALLER}" ]; then
-        echo -e "${RED}  ✗ 下载失败！请检查网络或稍后重试。${NC}"
-        rm -f "${TMP_INSTALLER}"
-        read -p "  按任意键返回菜单..." -n1 < /dev/tty
-        return
-    fi
+        clear
+        echo -e "${CYAN}======================================================${NC}"
+        echo -e "${CYAN}          Linux-ops-box 在线更新程序                  ${NC}"
+        echo -e "${CYAN}======================================================${NC}"
+        echo -e "  ➜ 选定下载源: ${YELLOW}${CHOSEN_PROXY}${NC}"
+        echo -e "  ➜ 最终资源 URL: ${CYAN}${FINAL_URL}${NC}"
+        echo -e "  ⏳ 正在从云端拉取最新安装器，请稍候..."
 
-    chmod +x "${TMP_INSTALLER}"
-    echo -e "${GREEN}  ✓ 下载完成，正在执行云端更新流程...${NC}"
-    echo -e "${CYAN}======================================================${NC}"
-    # 执行安装器并传入 --update 参数，强制云端覆盖安装
-    bash "${TMP_INSTALLER}" --update
-    local EXIT_CODE=$?
-    rm -f "${TMP_INSTALLER}"
+        local TMP_INSTALLER="/tmp/ops_box_updater_$$.sh"
+        local dl_success=false
 
-    if [ $EXIT_CODE -eq 0 ]; then
-        echo -e "\n${GREEN}🎉 工具箱已更新至最新版本！建议重新执行 ck_sysinit 加载新版。${NC}"
-    else
-        echo -e "\n${RED}  ✗ 更新过程中遇到错误（退出码: ${EXIT_CODE}），请检查日志。${NC}"
-    fi
-    read -p "  按任意键返回菜单..." -n1 < /dev/tty
+        if command -v curl &>/dev/null; then
+            if curl -fsSL --connect-timeout 8 -o "${TMP_INSTALLER}" "${FINAL_URL}"; then
+                dl_success=true
+            fi
+        else
+            if wget -qO "${TMP_INSTALLER}" --connect-timeout=8 "${FINAL_URL}"; then
+                dl_success=true
+            fi
+        fi
+
+        if [ "$dl_success" = "true" ] && [ -f "${TMP_INSTALLER}" ] && [ -s "${TMP_INSTALLER}" ]; then
+            if head -n 5 "${TMP_INSTALLER}" | grep -qE '#!/bin/|#!/usr/bin/'; then
+                chmod +x "${TMP_INSTALLER}"
+                echo -e "${GREEN}  ✓ 最新安装器拉取成功！正在启动更新覆盖流程...${NC}"
+                echo -e "${CYAN}======================================================${NC}"
+                
+                export LINUX_OPS_BOX_PROXY="${CHOSEN_PROXY}"
+                bash "${TMP_INSTALLER}" --update
+                local EXIT_CODE=$?
+                rm -f "${TMP_INSTALLER}"
+
+                if [ $EXIT_CODE -eq 0 ]; then
+                    echo -e "\n${GREEN}🎉 工具箱已成功更新至最新版本！建议重新运行 ck_sysinit 加载新版。${NC}"
+                else
+                    echo -e "\n${RED}❌ 更新过程中遇到错误（退出码: ${EXIT_CODE}），请检查系统日志。${NC}"
+                fi
+                read -p "  按任意键返回主菜单..." -n1 < /dev/tty
+                return
+            else
+                echo -e "${RED}  ❌ 校验失败：拉取的文件内容无效（可能已被代理劫持或重定向至报错页面）。${NC}"
+                rm -f "${TMP_INSTALLER}"
+            fi
+        else
+            echo -e "${RED}  ❌ 下载失败：网络连接超时或目标源无响应。${NC}"
+            rm -f "${TMP_INSTALLER}"
+        fi
+
+        echo -e "\n${YELLOW}  提示: 当前下载源可能已失效或被封锁。${NC}"
+        echo "  [1] 重新选择其他下载通道 / 重新探测"
+        echo "  [2] 重试当前下载通道"
+        echo "  [0] 取消更新并返回主菜单"
+        read -p "  请选择下一步操作 [1-2, 0]: " retry_opt < /dev/tty
+        case $retry_opt in
+            2) continue ;;
+            0) return ;;
+            *) continue ;;
+        esac
+    done
 }
 
 # --- MODULE SETUP COMPLETE ---
