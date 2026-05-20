@@ -1021,7 +1021,7 @@ cron_add() {
     esac
 
     # 生成 cron 命令
-    local script_path; script_path=$(realpath "$0")
+    local script_path; script_path=$(realpath "${BASH_SOURCE[0]}")
     local db_arg="$target_db"
     local real_cron_expr="$cron_expr"
     local cron_cmd
@@ -1922,7 +1922,7 @@ archive_cron_add() {
         *) log_error "无效选择"; return ;;
     esac
 
-    local script_path; script_path=$(realpath "$0")
+    local script_path; script_path=$(realpath "${BASH_SOURCE[0]}")
     local real_cron_expr="$cron_expr"
     local cron_cmd
     if [ "$freq" = "5" ]; then
