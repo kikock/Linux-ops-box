@@ -828,7 +828,8 @@ cron_add() {
 
 cron_list() {
     log_title "当前定时备份任务"
-    local tasks; tasks=$(crontab -l 2>/dev/null | grep "db_manager.sh --cron-backup")
+    local script_name; script_name=$(basename "$0")
+    local tasks; tasks=$(crontab -l 2>/dev/null | grep "$script_name --cron-backup")
     if [ -z "$tasks" ]; then
         log_warn "暂无定时备份任务"
     else
@@ -839,7 +840,8 @@ cron_list() {
 
 cron_delete() {
     log_title "删除定时备份任务"
-    local tasks; tasks=$(crontab -l 2>/dev/null | grep "db_manager.sh --cron-backup")
+    local script_name; script_name=$(basename "$0")
+    local tasks; tasks=$(crontab -l 2>/dev/null | grep "$script_name --cron-backup")
     if [ -z "$tasks" ]; then log_warn "暂无任务"; press_enter; return; fi
 
     local i=0; declare -A cron_map
@@ -1601,7 +1603,8 @@ archive_cron_add() {
 
 archive_cron_list() {
     log_title "归档定时任务"
-    local tasks; tasks=$(crontab -l 2>/dev/null | grep "db_manager.sh --cron-archive")
+    local script_name; script_name=$(basename "$0")
+    local tasks; tasks=$(crontab -l 2>/dev/null | grep "$script_name --cron-archive")
     [ -z "$tasks" ] && { log_warn "暂无归档定时任务"; press_enter; return; }
     echo "$tasks"
     press_enter
@@ -1609,7 +1612,8 @@ archive_cron_list() {
 
 archive_cron_delete() {
     log_title "删除归档定时任务"
-    local tasks; tasks=$(crontab -l 2>/dev/null | grep "db_manager.sh --cron-archive")
+    local script_name; script_name=$(basename "$0")
+    local tasks; tasks=$(crontab -l 2>/dev/null | grep "$script_name --cron-archive")
     [ -z "$tasks" ] && { log_warn "暂无任务"; press_enter; return; }
     local i=0; declare -A amap
     while IFS= read -r line; do
