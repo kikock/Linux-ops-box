@@ -233,6 +233,18 @@ sync_cron_tasks_from_crontab() {
     else
         rm -f "$tmp_config"
     fi
+
+    # ── 3. 清理已在系统的物理 crontab 中被删除/不存在的未匹配失效记录 ──
+    local crontabs_json
+    crontabs_json=$(crontab -l 2>/dev/null | grep -Ev '^(#|$)' | jq -R . | jq -s .)
+    
+    if [ -n "$crontabs_json" ] && [ "$crontabs_json" != "null" ] && [ "$crontabs_json" != "[]" ]; then
+        local clean_tmp; clean_tmp=$(mktemp)
+        jq --argjson crontabs "$crontabs_json" 'map(select(.cron_cmd as $cmd | $crontabs | any(. == $cmd)))' "$CRON_CONFIG" > "$clean_tmp" && mv "$clean_tmp" "$CRON_CONFIG"
+    elif [ "$crontabs_json" = "[]" ]; then
+        # 如果系统中已无任何物理 crontab 任务，则同步清空本地管理器的相关记录
+        echo "[]" > "$CRON_CONFIG"
+    fi
 }
 
 # ── 初始化配置文件 ────────────────────────────────────────────────

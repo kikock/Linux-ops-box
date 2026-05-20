@@ -191,6 +191,30 @@ fi
 
 # 3. 开始最终部署
 echo -e "\n[1/3] 正在构建系统级守护库: ${TARGET_OPT} ..."
+
+# ── 保护用户历史配置与备份数据 (平滑热升级) ─────────────────────────
+HAS_BACKUP=false
+TEMP_BACKUP_DIR="/tmp/_ck_sysinit_backup"
+if [ -d "$TARGET_OPT/db_manager" ]; then
+    echo -e "  ⏳ 正在为您的数据库配置与备份数据创建安全备份..."
+    rm -rf "$TEMP_BACKUP_DIR"
+    mkdir -p "$TEMP_BACKUP_DIR"
+    # 备份 .json 配置文件
+    find "$TARGET_OPT/db_manager" -maxdepth 1 -name "*.json" -exec cp -f {} "$TEMP_BACKUP_DIR/" \; 2>/dev/null
+    # 备份环境变量配置
+    [ -f "$TARGET_OPT/db_manager/.env.db" ] && cp -f "$TARGET_OPT/db_manager/.env.db" "$TEMP_BACKUP_DIR/"
+    # 备份历史 backups 备份目录
+    if [ -d "$TARGET_OPT/db_manager/backups" ]; then
+        cp -rf "$TARGET_OPT/db_manager/backups" "$TEMP_BACKUP_DIR/"
+    fi
+    # 备份历史 archive_sql 归档目录
+    if [ -d "$TARGET_OPT/db_manager/archive_sql" ]; then
+        cp -rf "$TARGET_OPT/db_manager/archive_sql" "$TEMP_BACKUP_DIR/"
+    fi
+    HAS_BACKUP=true
+fi
+# ───────────────────────────────────────────────────────────────────
+
 # 清理可能存在的旧目录，确保全新同步
 [ -d "$TARGET_OPT" ] && rm -rf "$TARGET_OPT"
 mkdir -p "$TARGET_OPT"
@@ -214,6 +238,30 @@ for standalone_script in install_docker.sh install_vpn.sh naive_install.sh insta
         cp -f "$REPO_ROOT/$standalone_script" "$TARGET_OPT/"
     fi
 done
+
+# ── 还原用户历史配置与备份数据 (平滑热升级) ─────────────────────────
+if [ "$HAS_BACKUP" = "true" ]; then
+    echo -e "  ⏳ 正在为您的数据库工具箱无损还原历史配置与备份数据..."
+    mkdir -p "$TARGET_OPT/db_manager"
+    # 还原配置文件
+    cp -f "$TEMP_BACKUP_DIR"/*.json "$TARGET_OPT/db_manager/" 2>/dev/null
+    # 还原环境变量
+    [ -f "$TEMP_BACKUP_DIR/.env.db" ] && cp -f "$TEMP_BACKUP_DIR/.env.db" "$TARGET_OPT/db_manager/"
+    # 还原 backups 物理目录
+    if [ -d "$TEMP_BACKUP_DIR/backups" ]; then
+        rm -rf "$TARGET_OPT/db_manager/backups"
+        cp -rf "$TEMP_BACKUP_DIR/backups" "$TARGET_OPT/db_manager/"
+    fi
+    # 还原 archive_sql 归档目录
+    if [ -d "$TEMP_BACKUP_DIR/archive_sql" ]; then
+        rm -rf "$TARGET_OPT/db_manager/archive_sql"
+        cp -rf "$TEMP_BACKUP_DIR/archive_sql" "$TARGET_OPT/db_manager/"
+    fi
+    # 清理临时备份痕迹
+    rm -rf "$TEMP_BACKUP_DIR"
+    echo -e "${GREEN}  ✓ 您的所有历史备份数据与连接配置已全部无损恢复上线！${NC}"
+fi
+# ───────────────────────────────────────────────────────────────────
 
 # 权限标准化清洗 (针对 Anolis OS/CentOS 8 严格模式)
 echo -e "  ⏳ 正在标准化全局权限协议 [755]..."
