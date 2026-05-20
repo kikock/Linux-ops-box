@@ -13,8 +13,8 @@ BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
 # ── 脚本目录 & 配置文件路径 ────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="$SCRIPT_DIR/.env.db"
-CONFIG_FILE="$SCRIPT_DIR/db_connections.json"
+ENV_FILE="/opt/ck_sysinit/db_manager/.env.db"
+CONFIG_FILE="/opt/ck_sysinit/db_manager/db_connections.json"
 
 # ── 加载 .env.db ──────────────────────────────────────────────────
 if [ -f "$ENV_FILE" ]; then
@@ -25,8 +25,8 @@ MAX_BACKUPS="${MAX_BACKUPS:-10}"
 BACKUP_COMPRESS="${BACKUP_COMPRESS:-gzip}"
 BACKUP_PREFIX="${BACKUP_PREFIX:-db_backup}"
 DB_CONFIG_FILE="${DB_CONFIG_FILE:-$CONFIG_FILE}"
-ARCHIVE_CONFIG="${ARCHIVE_CONFIG:-$SCRIPT_DIR/archive_rules.json}"
-CRON_CONFIG="${CRON_CONFIG:-$SCRIPT_DIR/cron_tasks.json}"
+ARCHIVE_CONFIG="${ARCHIVE_CONFIG:-/opt/ck_sysinit/db_manager/archive_rules.json}"
+CRON_CONFIG="${CRON_CONFIG:-/opt/ck_sysinit/db_manager/cron_tasks.json}"
 
 # ── Docker 模式辅助函数 ───────────────────────────────────────────
 # 连接信息全局变量（由 select_connection 填充）
