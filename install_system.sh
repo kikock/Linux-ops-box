@@ -92,7 +92,7 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
         echo -e "${GREEN}  ✓ 已继承更新程序指定的下载通道: ${GH_MIRROR}${NC}"
     else
         echo -e "  ⏳ 正在探测 Github 官方直连可用性..."
-        local is_direct_ok=false
+        is_direct_ok=false
         if command -v curl &>/dev/null; then
             if curl -Is -m 2 "https://github.com/kikock/Linux-ops-box" | head -1 | grep -qE 'HTTP/.*(200|301|302)'; then
                 is_direct_ok=true
@@ -107,16 +107,16 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
             echo -e "${GREEN}  ✓ Github 官方通道顺畅，已启用直连模式。${NC}"
         else
             echo -e "${YELLOW}  ⚠ Github 直连受阻，正在智能探测并分配国内可用加速通道...${NC}"
-            local candidates=(
+            candidates=(
                 "https://ghproxy.net"
                 "https://mirror.ghproxy.com"
                 "https://gh-proxy.com"
             )
-            local matched=false
+            matched=false
             for candidate in "${candidates[@]}"; do
                 echo -n "     ➜ 测试加速通道 [${candidate}] ... "
-                local check_url="${candidate}/https://github.com/kikock/Linux-ops-box"
-                local reachable=false
+                check_url="${candidate}/https://github.com/kikock/Linux-ops-box"
+                reachable=false
                 if command -v curl &>/dev/null; then
                     if curl -Is -m 2 "$check_url" &>/dev/null; then
                         reachable=true

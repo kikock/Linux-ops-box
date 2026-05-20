@@ -127,12 +127,29 @@ _test_proxy_speed() {
     local url="$1"
     if command -v curl &>/dev/null; then
         local score
-        score=$(curl -o /dev/null -s -w "%{time_total}\n" -m 2 -I "$url" || echo "9.999")
-        if [ "$score" != "9.999" ]; then
-            local clean_score=$(echo "$score" | tr -d '.')
-            clean_score=$(echo "$clean_score" | sed 's/^0*//')
-            [ -z "$clean_score" ] && clean_score=0
-            echo "$clean_score"
+        # 1. 运行 curl 探测并将退出码和 time_total 分离，不使用容易产生多行输出的对冲写法
+        score=$(curl -o /dev/null -s -w "%{time_total}" -m 2 -I "$url")
+        local exit_code=$?
+        
+        # 2. 只有当 curl 成功连接（退出码为 0）且获取到值时，才进行毫秒数值转化
+        if [ $exit_code -eq 0 ] && [ -n "$score" ]; then
+            # 兼容性浮点转整数：秒与毫秒前3位切分 (例如 1.208170 拆为 1 秒和 208 毫秒)
+            local sec=$(echo "$score" | cut -d. -f1)
+            local ms=$(echo "$score" | cut -d. -f2 | cut -c1-3)
+            
+            # 补齐 ms 保证其是 3 位数
+            while [ ${#ms} -lt 3 ]; do
+                ms="${ms}0"
+            done
+            
+            # 剔除前导 0 防止 Bash 将其误判为八进制 (例如 085 变 85，000 变 0)
+            sec=$(echo "$sec" | sed 's/^0*//')
+            [ -z "$sec" ] && sec=0
+            ms=$(echo "$ms" | sed 's/^0*//')
+            [ -z "$ms" ] && ms=0
+            
+            local total_ms=$(( sec * 1000 + ms ))
+            echo "$total_ms"
             return 0
         fi
     elif command -v wget &>/dev/null; then
