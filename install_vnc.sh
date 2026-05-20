@@ -206,17 +206,20 @@ check_and_install_gui
 
 # 4. 安装 VNC 服务端软件
 install_vnc_packages() {
-    _log_info "正在安装 VNC 服务端 (TigerVNC)..."
+    _log_info "正在安装 VNC 服务端 (TigerVNC 及 x11vnc)..."
     if [ "$DISTRO_FAMILY" = "redhat" ]; then
-        $PKG_MGR install -y tigervnc-server tigervnc-server-module
+        if [[ "$DISTRO_ID" =~ (centos|rhel|rocky|almalinux) ]] && ! rpm -q epel-release &>/dev/null; then
+            $PKG_MGR install -y epel-release || true
+        fi
+        $PKG_MGR install -y tigervnc-server tigervnc-server-module x11vnc
     elif [ "$DISTRO_FAMILY" = "debian" ]; then
         apt-get update
-        apt-get install -y tigervnc-standalone-server tigervnc-common dbus-x11
+        apt-get install -y tigervnc-standalone-server tigervnc-common dbus-x11 x11vnc
     elif [ "$DISTRO_FAMILY" = "arch" ]; then
-        pacman -Sy --noconfirm tigervnc xorg-server
+        pacman -Sy --noconfirm tigervnc xorg-server x11vnc
     elif [ "$DISTRO_FAMILY" = "alpine" ]; then
         apk update
-        apk add tigervnc dbus xvfb xorg-server
+        apk add tigervnc dbus xvfb xorg-server x11vnc
     else
         _log_err "该系统架构暂不支持自动下载 VNC 软件包，请先手动配置 vncserver 后再试。"
         exit 1
