@@ -20,7 +20,7 @@ CONFIG_FILE="$SCRIPT_DIR/db_connections.json"
 if [ -f "$ENV_FILE" ]; then
     source "$ENV_FILE"
 fi
-BACKUP_DIR="${BACKUP_DIR:-$SCRIPT_DIR/backups}"
+BACKUP_DIR="${BACKUP_DIR:-/opt/backups}"
 MAX_BACKUPS="${MAX_BACKUPS:-10}"
 BACKUP_COMPRESS="${BACKUP_COMPRESS:-gzip}"
 BACKUP_PREFIX="${BACKUP_PREFIX:-db_backup}"
@@ -256,6 +256,46 @@ init_config() {
     if [ ! -f "$CRON_CONFIG" ]; then
         echo "[]" > "$CRON_CONFIG"
     fi
+
+    # ── 历史备份与归档数据平滑向下合并兼容迁移 ─────────────────────────
+    local old_backup_dir="$SCRIPT_DIR/backups"
+    if [ -d "$old_backup_dir" ] && [ "$old_backup_dir" != "$BACKUP_DIR" ]; then
+        # 确保新备份目录存在
+        mkdir -p "$BACKUP_DIR"
+        # 检查旧备份目录下是否有非空内容
+        if [ "$(ls -A "$old_backup_dir" 2>/dev/null)" ]; then
+            log_info "检测到老版本工具箱历史备份数据，正在平滑搬迁至外部持久路径 '$BACKUP_DIR'..."
+            # 采用 cp -rf 合并到新目录，再删除旧目录，确保安全性
+            cp -rf "$old_backup_dir"/* "$BACKUP_DIR/" 2>/dev/null
+            if [ $? -eq 0 ]; then
+                rm -rf "$old_backup_dir"
+                log_info "✓ 历史备份数据搬迁完成"
+            else
+                log_warn "⚠️ 历史备份数据搬迁中遇到部分文件受阻，请手动检查: $old_backup_dir"
+            fi
+        else
+            rm -rf "$old_backup_dir"
+        fi
+    fi
+
+    # 兼容可能存在的旧归档目录 $SCRIPT_DIR/archive_sql
+    local old_archive_dir="$SCRIPT_DIR/archive_sql"
+    if [ -d "$old_archive_dir" ] && [ "$old_archive_dir" != "${BACKUP_DIR}/archive_sql" ]; then
+        mkdir -p "${BACKUP_DIR}/archive_sql"
+        if [ "$(ls -A "$old_archive_dir" 2>/dev/null)" ]; then
+            log_info "检测到老版本工具箱历史归档数据，正在平滑搬迁至外部持久路径 '${BACKUP_DIR}/archive_sql'..."
+            cp -rf "$old_archive_dir"/* "${BACKUP_DIR}/archive_sql/" 2>/dev/null
+            if [ $? -eq 0 ]; then
+                rm -rf "$old_archive_dir"
+                log_info "✓ 历史归档数据搬迁完成"
+            else
+                log_warn "⚠️ 历史归档数据搬迁中遇到部分文件受阻，请手动检查: $old_archive_dir"
+            fi
+        else
+            rm -rf "$old_archive_dir"
+        fi
+    fi
+
     mkdir -p "$BACKUP_DIR"
     sync_cron_tasks_from_crontab
 }
