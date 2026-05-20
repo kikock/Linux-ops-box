@@ -109,6 +109,132 @@ check_pv() {
     fi
 }
 
+# ── 自动同步 crontab 历史定时任务 ──────────────────────────────────
+sync_cron_tasks_from_crontab() {
+    # 确保配置文件和相关文件夹存在
+    if [ ! -f "$DB_CONFIG_FILE" ] || [ ! -f "$CRON_CONFIG" ]; then
+        return
+    fi
+    
+    local crontab_output
+    crontab_output=$(crontab -l 2>/dev/null)
+    [ -z "$crontab_output" ] && return
+    
+    local updated=0
+    local tmp_config; tmp_config=$(mktemp)
+    cp "$CRON_CONFIG" "$tmp_config"
+    
+    while IFS= read -r line; do
+        # 忽略空行和注释行
+        [[ -z "$line" || "$line" =~ ^# ]] && continue
+        
+        # 判断是否属于本系统的备份或归档定时任务
+        local is_backup=0
+        local is_archive=0
+        if [[ "$line" == *"--cron-backup"* ]]; then
+            is_backup=1
+        elif [[ "$line" == *"--cron-archive"* ]]; then
+            is_archive=1
+        fi
+        
+        [ "$is_backup" -eq 0 ] && [ "$is_archive" -eq 0 ] && continue
+        
+        # 精准查重：判断该整行 crontab 命令行在当前 JSON 中是否已记录
+        local exists
+        exists=$(jq --arg cmd "$line" '.[] | select(.cron_cmd == $cmd)' "$tmp_config" 2>/dev/null)
+        if [ -n "$exists" ]; then
+            continue
+        fi
+        
+        # 1. 提取最前面 5 位作为 cron_expr_5
+        local cron_expr_5
+        cron_expr_5=$(echo "$line" | awk '{print $1" "$2" "$3" "$4" "$5}')
+        
+        # 2. 检查并解析年份过滤
+        local cron_expr="$cron_expr_5"
+        if echo "$line" | grep -q 'date'; then
+            # 格式：[ $(( ( $(date +\%Y) - 2026 ) \% 2 )) -eq 0 ]
+            local start_yr yrs
+            start_yr=$(echo "$line" | sed -n 's/.*date[^)]*)\s*-\s*\([0-9]\{4\}\).*/\1/p')
+            yrs=$(echo "$line" | sed -n 's/.*date[^)]*)\s*-\s*[0-9]\{4\}\s*)\s*\\?%\s*\([0-9]\+\).*/\1/p')
+            if [ -n "$start_yr" ] && [ -n "$yrs" ]; then
+                cron_expr="${cron_expr_5} (每 ${yrs} 年, 基准 ${start_yr})"
+            fi
+        fi
+        
+        local task_id; task_id="task_$(date +%s%N 2>/dev/null || date +%s)_$RANDOM"
+        local new_task=""
+        
+        if [ "$is_backup" -eq 1 ]; then
+            # 备份任务解析
+            local conn_idx db_part database conn_alias
+            conn_idx=$(echo "$line" | sed -n 's/.*--cron-backup \+\([0-9]\+\).*/\1/p')
+            db_part=$(echo "$line" | sed -n 's/.*--cron-backup \+[0-9]\+ \+\(.*\)/\1/p' | sed 's/ >>.*//')
+            database=$(echo "$db_part" | sed 's/^"//;s/"$//')
+            
+            # 安全防御：如果 conn_idx 解析不成功或非数字，则跳过此行
+            if [[ ! "$conn_idx" =~ ^[0-9]+$ ]]; then
+                continue
+            fi
+            
+            conn_alias=$(jq -r ".[$conn_idx].alias // \"\"" "$DB_CONFIG_FILE" 2>/dev/null)
+            if [ -z "$conn_alias" ]; then
+                conn_alias="历史连接(序号:${conn_idx})"
+            fi
+            
+            new_task=$(jq -n \
+                --arg id "$task_id" \
+                --arg type "backup" \
+                --argjson conn_idx "$conn_idx" \
+                --arg conn_alias "$conn_alias" \
+                --arg database "$database" \
+                --arg cron_expr "$cron_expr" \
+                --arg cron_cmd "$line" \
+                '{id:$id,type:$type,conn_idx:$conn_idx,conn_alias:$conn_alias,database:$database,cron_expr:$cron_expr,cron_cmd:$cron_cmd}')
+            
+        elif [ "$is_archive" -eq 1 ]; then
+            # 归档任务解析
+            local rule_part rule_arg rule_name
+            rule_part=$(echo "$line" | sed -n 's/.*--cron-archive \+\(.*\)/\1/p' | sed 's/ >>.*//')
+            rule_arg=$(echo "$rule_part" | sed 's/^"//;s/"$//')
+            
+            [ -z "$rule_arg" ] && continue
+            
+            if [ "$rule_arg" = "__ALL__" ]; then
+                rule_name="全部归档规则"
+            else
+                rule_name=$(jq -r ".[$rule_arg].name // \"\"" "$ARCHIVE_CONFIG" 2>/dev/null)
+                if [ -z "$rule_name" ]; then
+                    rule_name="历史规则(序号:${rule_arg})"
+                fi
+            fi
+            
+            new_task=$(jq -n \
+                --arg id "$task_id" \
+                --arg type "archive" \
+                --arg rule_arg "$rule_arg" \
+                --arg rule_name "$rule_name" \
+                --arg cron_expr "$cron_expr" \
+                --arg cron_cmd "$line" \
+                '{id:$id,type:$type,rule_arg:$rule_arg,rule_name:$rule_name,cron_expr:$cron_expr,cron_cmd:$cron_cmd}')
+        fi
+        
+        if [ -n "$new_task" ]; then
+            local update_tmp; update_tmp=$(mktemp)
+            jq --argjson t "$new_task" '. += [$t]' "$tmp_config" > "$update_tmp" && mv "$update_tmp" "$tmp_config"
+            updated=1
+        fi
+        
+    done <<< "$crontab_output"
+    
+    if [ "$updated" -eq 1 ]; then
+        mv "$tmp_config" "$CRON_CONFIG"
+        log_info "已自动发现并同步历史 crontab 定时任务至本地管理配置中！"
+    else
+        rm -f "$tmp_config"
+    fi
+}
+
 # ── 初始化配置文件 ────────────────────────────────────────────────
 init_config() {
     if [ ! -f "$DB_CONFIG_FILE" ]; then
@@ -119,6 +245,7 @@ init_config() {
         echo "[]" > "$CRON_CONFIG"
     fi
     mkdir -p "$BACKUP_DIR"
+    sync_cron_tasks_from_crontab
 }
 
 # ── 读取连接数列表 ────────────────────────────────────────────────
