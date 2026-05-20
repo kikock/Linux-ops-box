@@ -69,6 +69,8 @@ vnc_install_instance() {
                 fi
             fi
         fi
+
+        if command -v curl &>/dev/null; then
             curl -fsSL -o /tmp/install_vnc.sh "${GH_MIRROR}/kikock/Linux-ops-box/raw/main/install_vnc.sh"
         else
             _log_err "缺少 curl 工具，无法自动云端安装。"
