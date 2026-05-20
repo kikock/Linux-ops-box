@@ -1292,6 +1292,41 @@ do_archive_rule() {
     log_info "  待处理行数: ${total_rows:-未知}"
     [ "${total_rows:-0}" = "0" ] && { log_info "  无需归档，跳过"; return 0; }
 
+    # sql 模式：备份为 SQL/CSV 压缩文件
+    if [ "$mode" = "sql" ]; then
+        local archive_sql_dir="${BACKUP_DIR}/archive_sql/${db_name}"
+        mkdir -p "$archive_sql_dir"
+        local ts; ts=$(date +%Y%m%d_%H%M%S)
+        local filepath=""
+
+        if [ "$_type" = "mysql" ]; then
+            filepath="${archive_sql_dir}/${tbl_name}_archive_${ts}.sql.gz"
+            local where_clause="\`${date_col}\` < DATE_SUB(NOW(), INTERVAL ${retention} DAY)"
+            log_info "  正在执行 MySQL 局部数据流式备份..."
+            if [ "$_cmode" = "docker" ] && [ -n "$_container" ]; then
+                docker exec -i "$_container" mysqldump -u"$_user" -p"$_pass" --single-transaction --no-create-info --skip-triggers --where="$where_clause" "$db_name" "$tbl_name" 2>/dev/null | gzip > "$filepath"
+            else
+                MYSQL_PWD="$_pass" mysqldump -h"$_host" -P"$_port" -u"$_user" --single-transaction --no-create-info --skip-triggers --where="$where_clause" "$db_name" "$tbl_name" 2>/dev/null | gzip > "$filepath"
+            fi
+        else
+            filepath="${archive_sql_dir}/${tbl_name}_archive_${ts}.csv.gz"
+            log_info "  正在执行 PostgreSQL 局部数据流式备份..."
+            if [ "$_cmode" = "docker" ] && [ -n "$_container" ]; then
+                docker exec -i "$_container" psql -U "$_user" -d "$db_name" -c "COPY (SELECT * FROM \"$tbl_name\" WHERE \"$date_col\" < NOW() - INTERVAL '$retention days') TO STDOUT WITH CSV HEADER" 2>/dev/null | gzip > "$filepath"
+            else
+                PGPASSWORD="$_pass" psql -h "$_host" -p "$_port" -U "$_user" -d "$db_name" -c "COPY (SELECT * FROM \"$tbl_name\" WHERE \"$date_col\" < NOW() - INTERVAL '$retention days') TO STDOUT WITH CSV HEADER" 2>/dev/null | gzip > "$filepath"
+            fi
+        fi
+
+        # 核心安全强熔断拦截
+        if [ ! -s "$filepath" ]; then
+            log_error "  ✗ 局部历史数据备份导出失败或为空！流程强行熔断拦截，不清理原表！"
+            rm -f "$filepath" 2>/dev/null
+            return 1
+        fi
+        log_info "  ✓ 局部历史数据已成功流式备份至: $filepath"
+    fi
+
     # move 模式：确保归档表存在
     if [ "$mode" = "move" ]; then
         [ -z "$archive_db" ]  && archive_db="${db_name}_archive"
@@ -1514,9 +1549,11 @@ archive_add_rule() {
     read -rp "时间字段名 (如: created_at): " date_col
     [ -z "$date_col" ] && { log_error "时间字段不能为空"; return 1; }
     read -rp "数据保留天数 [默认90]: " retention; retention="${retention:-90}"
-    echo -e "\n归档模式:\n  ${GREEN}1)${NC} move — 移至归档表（保留数据，可查询）\n  ${GREEN}2)${NC} delete — 直接删除（彻底清理）"
-    read -rp "选择 [1/2, 默认1]: " msel
-    local amode="move"; [ "$msel" = "2" ] && amode="delete"
+    echo -e "\n归档模式:\n  ${GREEN}1)${NC} move — 移至归档表（保留数据，可查询）\n  ${GREEN}2)${NC} delete — 直接删除（彻底清理）\n  ${GREEN}3)${NC} sql — 备份为 SQL 压缩文件并清理原表"
+    read -rp "选择 [1/2/3, 默认1]: " msel
+    local amode="move"
+    [ "$msel" = "2" ] && amode="delete"
+    [ "$msel" = "3" ] && amode="sql"
     local archive_db="" archive_tbl=""
     if [ "$amode" = "move" ]; then
         read -rp "归档库名 [默认: ${db_name}_archive]: " archive_db; archive_db="${archive_db:-${db_name}_archive}"
@@ -1570,6 +1607,8 @@ archive_list_rules() {
             adb=$(jq -r ".[$i].archive_db // \"\"" "$ARCHIVE_CONFIG")
             atbl=$(jq -r ".[$i].archive_table // \"\"" "$ARCHIVE_CONFIG")
             echo -e "      归档目标: ${adb}.${atbl}"
+        elif [ "$mode" = "sql" ]; then
+            echo -e "      归档目标: 本地 SQL 备份压缩包 (备份后释放原表空间)"
         fi
         ((i++))
     done
