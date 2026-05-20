@@ -42,10 +42,61 @@ _get_gh_mirror() {
             echo "${LINUX_OPS_BOX_PROXY%/}/https://github.com"
         fi
     else
-        if curl -Is -m 3 "https://github.com" | head -1 | grep -qE 'HTTP/.*(200|301|302)'; then
+        # 1. 尝试直连 Github
+        local is_direct_ok=false
+        if command -v curl &>/dev/null; then
+            if curl -Is -m 2 "https://github.com" | head -1 | grep -qE 'HTTP/.*(200|301|302)'; then
+                is_direct_ok=true
+            fi
+        elif command -v wget &>/dev/null; then
+            if wget --spider -q -T 2 "https://github.com" &>/dev/null; then
+                is_direct_ok=true
+            fi
+        fi
+
+        if [ "$is_direct_ok" = "true" ]; then
             echo "https://github.com"
         else
-            echo "https://ghproxy.net/https://github.com"
+            # 2. 如果直连不通，智能测试并分配国内可用加速通道
+            # 注意：此处因是子 shell 变量捕获调用，所有的进度交互提示 echo 必须重定向至标准错误 >&2
+            echo -e "  ${YELLOW}⏳ GitHub 直连受阻，正在智能探测并分配国内可用加速通道...${NC}" >&2
+            local candidates=(
+                "https://ghproxy.net"
+                "https://mirror.ghproxy.com"
+                "https://gh-proxy.com"
+            )
+            local best_mirror="https://ghproxy.net/https://github.com" # 默认兜底
+            local matched=false
+            
+            for candidate in "${candidates[@]}"; do
+                echo -n "     ➜ 测试加速通道 [${candidate}] ... " >&2
+                local check_url="${candidate}/https://github.com"
+                local reachable=false
+                if command -v curl &>/dev/null; then
+                    if curl -Is -m 2 "$check_url" &>/dev/null; then
+                        reachable=true
+                    fi
+                elif command -v wget &>/dev/null; then
+                    if wget --spider -q -T 2 "$check_url" &>/dev/null; then
+                        reachable=true
+                    fi
+                fi
+                
+                if [ "$reachable" = "true" ]; then
+                    echo -e "${GREEN}正常可用${NC}" >&2
+                    best_mirror="${candidate}/https://github.com"
+                    matched=true
+                    break
+                else
+                    echo -e "${RED}不可用${NC}" >&2
+                fi
+            done
+            
+            if [ "$matched" = "false" ]; then
+                echo -e "  ${RED}❌ 警告: 所有内置加速源均无法连通，将回退至默认加速源进行尝试。${NC}" >&2
+            fi
+            
+            echo "$best_mirror"
         fi
     fi
 }
