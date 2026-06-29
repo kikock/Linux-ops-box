@@ -233,7 +233,7 @@ for extra_dir in docker nginx static config db_manager; do
 done
 # 同步根目录独立脚本 (供 docker_mgmt.sh 调用)
 REPO_ROOT="$(dirname "$SRC_DIR")"
-for standalone_script in install_docker.sh install_vpn.sh naive_install.sh install_vnc.sh; do
+for standalone_script in install_docker.sh install_vpn.sh naive_install.sh install_vnc.sh setup_proxy_registry.sh; do
     if [ -f "$REPO_ROOT/$standalone_script" ]; then
         cp -f "$REPO_ROOT/$standalone_script" "$TARGET_OPT/"
     fi

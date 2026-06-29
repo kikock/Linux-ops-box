@@ -363,12 +363,13 @@ while true; do
     echo " 8. 数据库管理中心       (MySQL/PostgreSQL 备份归档)"
     echo " 9. Docker 管理中心      (安装/服务管理/Compose)"
     echo " 10. VNC 服务管理中心     (一键安装/自启/多账户)"
+    echo " 11. 服务器代理配置       (Hosts/环境变量/Docker代理与信任)"
     echo -e "${GREEN}══════════════ ⚙   工具箱管理   ══════════════${NC}"
-    echo -e "${YELLOW} 11. ♻  在线更新工具箱${NC}"
-    echo -e "${RED} 12. 🗑  卸载此工具箱${NC}"
+    echo -e "${YELLOW} 12. ♻  在线更新工具箱${NC}"
+    echo -e "${RED} 13. 🗑  卸载此工具箱${NC}"
     echo " 0.  退出工具箱"
     echo -e "${GREEN}==============================================${NC}"
-    read -p "请输入指令编号 [0-12]: " choice < /dev/tty
+    read -p "请输入指令编号 [0-13]: " choice < /dev/tty
 
     case $choice in
         1)  update_system_packages ;;
@@ -381,8 +382,20 @@ while true; do
         8)  db_management_center ;;
         9)  docker_management_center ;;
         10) vnc_management_center ;;
-        11) _update_toolbox ;;
-        12)
+        11)
+            local proxy_script="$BASE_DIR/setup_proxy_registry.sh"
+            if [ ! -f "$proxy_script" ]; then
+                proxy_script="/opt/ck_sysinit/setup_proxy_registry.sh"
+            fi
+            if [ -f "$proxy_script" ]; then
+                bash "$proxy_script"
+            else
+                echo -e "${RED}错误: 找不到代理配置脚本: $proxy_script${NC}"
+                read -p "按回车键继续..."
+            fi
+            ;;
+        12) _update_toolbox ;;
+        13)
             echo -e "${YELLOW}警告: 即将执行彻底卸载程序...${NC}"
             read -p "是否确认从系统中移除 Linux-ops-box? [y/N]: " confirm
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
