@@ -51,6 +51,15 @@ fi
 if [ -f "$BASE_DIR/modules/vnc_mgmt.sh" ]; then
     source "$BASE_DIR/modules/vnc_mgmt.sh"
 fi
+if [ -f "$BASE_DIR/modules/disk_mgmt.sh" ]; then
+    source "$BASE_DIR/modules/disk_mgmt.sh"
+fi
+if [ -f "$BASE_DIR/modules/ssl_cert.sh" ]; then
+    source "$BASE_DIR/modules/ssl_cert.sh"
+fi
+if [ -f "$BASE_DIR/modules/acme.sh" ]; then
+    source "$BASE_DIR/modules/acme.sh"
+fi
 
 # ================================================================
 # 1. 静态环境参数自检 (只在启动时检索 1 次，缓存以提升性能)
@@ -364,12 +373,15 @@ while true; do
     echo " 9. Docker 管理中心      (安装/服务管理/Compose)"
     echo " 10. VNC 服务管理中心     (一键安装/自启/多账户)"
     echo " 11. 服务器代理配置       (Hosts/环境变量/Docker代理与信任)"
+    echo " 15. SSL/TLS 自签证书中心 (SAN多域名/IP/泛域名/自建CA)"
+    echo -e "${GREEN}══════════════ 💾  磁盘管理中心 ══════════════${NC}"
+    echo " 14. 硬盘检测与清理中心   (使用率/大文件/大目录/清理)"
     echo -e "${GREEN}══════════════ ⚙   工具箱管理   ══════════════${NC}"
     echo -e "${YELLOW} 12. ♻  在线更新工具箱${NC}"
     echo -e "${RED} 13. 🗑  卸载此工具箱${NC}"
     echo " 0.  退出工具箱"
     echo -e "${GREEN}==============================================${NC}"
-    read -p "请输入指令编号 [0-13]: " choice < /dev/tty
+    read -p "请输入指令编号 [0-15]: " choice < /dev/tty
 
     case $choice in
         1)  update_system_packages ;;
@@ -394,6 +406,8 @@ while true; do
                 read -p "按回车键继续..."
             fi
             ;;
+        15) ssl_cert_menu ;;
+        14) disk_management_center ;;
         12) _update_toolbox ;;
         13)
             echo -e "${YELLOW}警告: 即将执行彻底卸载程序...${NC}"
