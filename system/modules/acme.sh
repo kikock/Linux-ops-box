@@ -46,7 +46,7 @@ v6=$(curl -s6m5 icanhazip.com -k)
 # ----------------------------------------------------------------
 _check_acme_deps(){
     local missing_pkgs=()
-    local packages=("curl" "openssl" "lsof" "socat" "tar" "wget")
+    local packages=("curl" "openssl" "tar" "wget")
 
     for pkg in "${packages[@]}"; do
         if ! command -v "$pkg" &>/dev/null; then
@@ -63,20 +63,38 @@ _check_acme_deps(){
         fi
     fi
 
-    # 检查 dig
-    if ! command -v dig &>/dev/null; then
-        if [ "$release" = "Centos" ]; then
-            missing_pkgs+=("bind-utils")
-        else
-            missing_pkgs+=("dnsutils")
-        fi
+    # 检查 lsof
+    if ! command -v lsof &>/dev/null && ! command -v ss &>/dev/null; then
+        missing_pkgs+=("lsof")
     fi
 
-    # 如果所有依赖均已就绪，直接返回
+    # 如果所有核心依赖均已就绪，直接返回
     if [ ${#missing_pkgs[@]} -eq 0 ]; then
         return 0
     fi
 
+    # 1. 尝试从本地 packages/ 目录离线安装 deb/rpm
+    local pkg_dir=""
+    for d in "$BASE_DIR/packages" "/opt/ck_sysinit/packages" "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../packages"; do
+        if [ -d "$d" ]; then
+            pkg_dir="$d"
+            break
+        fi
+    done
+
+    if [ -n "$pkg_dir" ]; then
+        if command -v dpkg &>/dev/null && ls "$pkg_dir"/*.deb &>/dev/null; then
+            yellow "正在从本地 packages 目录离线安装 deb 依赖包..."
+            dpkg -i "$pkg_dir"/*.deb 2>/dev/null || true
+            return 0
+        elif command -v rpm &>/dev/null && ls "$pkg_dir"/*.rpm &>/dev/null; then
+            yellow "正在从本地 packages 目录离线安装 rpm 依赖包..."
+            rpm -ivh --nodeps "$pkg_dir"/*.rpm 2>/dev/null || true
+            return 0
+        fi
+    fi
+
+    # 2. 联网状态下尝试包管理器安装
     yellow "检测到系统缺失部分工具: ${missing_pkgs[*]}，正在尝试自动安装..."
     if [ -x "$(command -v apt-get)" ]; then
         apt-get update -y 2>/dev/null || true
@@ -102,12 +120,29 @@ if [[ -z $(curl -s4m2 icanhazip.com -k 2>/dev/null) ]]; then
 fi
 
 acme2(){
-if [[ -n $(lsof -i :80 2>/dev/null | grep -v "PID") ]]; then
-yellow "检测到80端口被占用，现执行80端口全释放"
-sleep 1
-lsof -i :80 2>/dev/null | grep -v "PID" | awk '{print "kill -9",$2}' | sh >/dev/null 2>&1 || true
-green "80端口全释放完毕！"
-sleep 1
+local port_busy=false
+if command -v lsof &>/dev/null; then
+    if [[ -n $(lsof -i :80 2>/dev/null | grep -v "PID") ]]; then
+        port_busy=true
+    fi
+elif command -v ss &>/dev/null; then
+    if ss -tlpn 2>/dev/null | grep -q ":80 "; then
+        port_busy=true
+    fi
+fi
+
+if [ "$port_busy" = "true" ]; then
+    yellow "检测到80端口被占用，现执行80端口全释放"
+    sleep 1
+    if command -v fuser &>/dev/null; then
+        fuser -k 80/tcp >/dev/null 2>&1 || true
+    elif command -v lsof &>/dev/null; then
+        lsof -i :80 2>/dev/null | grep -v "PID" | awk '{print "kill -9",$2}' | sh >/dev/null 2>&1 || true
+    else
+        kill -9 $(ss -tlpn 2>/dev/null | grep ":80 " | grep -oE 'pid=[0-9]+' | cut -d= -f2) >/dev/null 2>&1 || true
+    fi
+    green "80端口全释放完毕！"
+    sleep 1
 fi
 }
 
@@ -237,11 +272,25 @@ vpsip="$v6 或者 $v4"
 else
 vpsip=$v4
 fi
-domainIP=$(dig @8.8.8.8 +time=2 +short "$ym" 2>/dev/null | grep -m1 '^[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+$')
-if echo $domainIP | grep -q "network unreachable\|timed out" || [[ -z $domainIP ]]; then
-domainIP=$(dig @2001:4860:4860::8888 +time=2 aaaa +short "$ym" 2>/dev/null | grep -m1 ':')
+domainIP=""
+if command -v dig &>/dev/null; then
+    domainIP=$(dig @8.8.8.8 +time=2 +short "$ym" 2>/dev/null | grep -m1 '^[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+$')
+    if echo $domainIP | grep -q "network unreachable\|timed out" || [[ -z $domainIP ]]; then
+        domainIP=$(dig @2001:4860:4860::8888 +time=2 aaaa +short "$ym" 2>/dev/null | grep -m1 ':')
+    fi
 fi
-if echo $domainIP | grep -q "network unreachable\|timed out" || [[ -z $domainIP ]] ; then
+
+# 降级方案 1: 使用 getent hosts
+if [ -z "$domainIP" ] && command -v getent &>/dev/null; then
+    domainIP=$(getent hosts "$ym" 2>/dev/null | awk '{print $1}' | head -n 1)
+fi
+
+# 降级方案 2: 使用 ping
+if [ -z "$domainIP" ] && command -v ping &>/dev/null; then
+    domainIP=$(ping -c 1 -W 2 "$ym" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
+fi
+
+if echo "$domainIP" | grep -q "network unreachable\|timed out" || [[ -z $domainIP ]] ; then
 red "未解析出IP，请检查域名是否输入有误" 
 yellow "是否尝试手动输入强行匹配？"
 yellow "1：是！输入域名解析的IP"
