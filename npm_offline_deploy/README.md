@@ -24,8 +24,8 @@ npm_offline_deploy/
 |:---|:---|:---|
 | **1. 调整原 Web 容器端口** | 确保原 Web 容器映射端口调整为 **`8080:8080`** (或 `8080:80`) | 💡 **重点**：把宿主机的 **`80`** 和 **`443`** 端口空出来，留给 NPM 网关统一接管。 |
 | **2. 离线启动 NPM 容器** | 运行 `bash deploy_npm.sh`（占用宿主机 `80`、`443`、`81`） | NPM 容器启动后，即可作为全机统一的 HTTPS 流量调度网关。 |
-| **3. 离线生成域名自签证书** | 运行 `bash generate_cert.sh` 或使用 `ck_sysinit` 选 **15** | 输入 `xxx.kikock.com`，生成自带 SAN 扩展的 `.key` 和 `.crt` 文件。 |
-| **4. NPM UI 配置反代与证书** | 登录 `http://IP:81` 后操作：<br>① **SSL 证书** -> **自定义证书** -> 粘贴 `.key` 和 `.crt` 内容；<br>② **代理服务 (Proxy Hosts)** -> 添加域名 `xxx.kikock.com` -> 转发到 `host.docker.internal:8080` -> 绑定证书并勾选 **Force SSL**。 | 图形化完成证书加载与 HTTPS 流量转发路由。 |
+| **3. 离线生成域名自签证书** | **推荐**：运行 `ck_sysinit`（或 `bash system/system_init.sh`），选择 **`12. SSL/TLS 证书管理中心`** -> **`5. 一键生成自签名 SSL 证书`**；<br>*（亦可直接运行 `bash generate_cert.sh`）* | 输入域名 `xxx.kikock.com`，全自动离线生成自带 SAN 扩展的 `.key` 私钥与 `.crt` 证书。 |
+| **4. NPM UI 配置反代与证书** | 登录 `http://IP:81` 后操作：<br>① **SSL Certificates** -> **Add Custom Certificate** -> 粘贴生成的 `.key` 和 `.crt` 内容；<br>② **Proxy Hosts** -> 添加域名 `xxx.kikock.com` -> 转发到 `host.docker.internal:8080` -> 绑定证书并勾选 **Force SSL**。 | 图形化完成证书加载与 HTTPS 流量转发路由。 |
 | **5. 验证与访问** | 浏览器访问：`https://xxx.kikock.com`<br>或终端测试：`curl -k -I https://xxx.kikock.com/` | 成功通过 HTTPS 加密隧道访问到映射在 8080 的 Web 业务页面。 |
 
 ```text
@@ -56,29 +56,34 @@ npm_offline_deploy/
    bash prepare_offline_image.sh
    ```
    *脚本会自动拉取 `jc21/nginx-proxy-manager:latest` 镜像并打包为 `npm_image.tar`。*
-3. 将整个 `npm_offline_deploy` 文件夹（包含 `npm_image.tar`）拷贝至目标无网服务器。
+3. 将整个 `Linux-ops-box` 文件夹（包含 `npm_offline_deploy` 及 `npm_image.tar`）拷贝至目标无网服务器。
 
 ---
 
 ### 第二阶段：在【无网目标服务器】上一键部署
 
-1. 在无网服务器上进入该目录并赋予执行权限：
+1. 在无网服务器上进入 `npm_offline_deploy` 目录并启动 NPM：
    ```bash
    cd npm_offline_deploy
    chmod +x *.sh
-   ```
-
-2. 运行一键部署脚本：
-   ```bash
    bash deploy_npm.sh
    ```
    *脚本会自动加载 `npm_image.tar` 并通过 Docker 启动 NPM 容器（监听 80、443、81 端口）。*
 
-3. 离线生成域名自签 SSL 证书：
+2. **使用工具箱生成域名自签 SSL 证书（推荐方式）**：
    ```bash
-   bash generate_cert.sh
+   ck_sysinit
+   # 或进入 system 目录运行: bash system/system_init.sh
    ```
-   *根据提示输入您的域名（如 `xxx.kikock.com`），脚本将自动在 `certs/xxx_kikock_com/` 目录下生成带有 SAN 扩展的 `.crt` 证书与 `.key` 私钥。*
+   * **操作步骤**：
+     1. 主菜单选择 **`12. SSL/TLS 证书管理中心`**；
+     2. 子菜单选择 **`5. 一键生成自签名 SSL 证书 (RSA 2048 + 10年)`**；
+     3. 输入您的域名：`xxx.kikock.com`；
+     4. 脚本将全自动生成私钥与证书，默认保存在 `/root/kikock_ssl/xxx.kikock.com/`：
+        - 私钥文件：`/root/kikock_ssl/xxx.kikock.com/server.key`
+        - 证书文件：`/root/kikock_ssl/xxx.kikock.com/server.crt`
+   
+   *(备用方式：亦可在 `npm_offline_deploy` 目录下直接执行 `bash generate_cert.sh`)*
 
 ---
 
@@ -94,8 +99,8 @@ npm_offline_deploy/
    - 点击顶部导航栏 **`SSL Certificates`**；
    - 点击右上角 **`Add SSL Certificate`** -> 选择 **`Custom`**；
    - **Name**: 填写 `xxx.kikock.com`；
-   - **Certificate Key**: 打开服务器上生成的 `certs/xxx_kikock_com/xxx_kikock_com.key`，复制全部文本内容粘贴进来；
-   - **Certificate**: 打开服务器上生成的 `certs/xxx_kikock_com/xxx_kikock_com.crt`，复制全部文本内容粘贴进来；
+   - **Certificate Key**: 打开服务器上生成的 `server.key`（或 `xxx_kikock_com.key`），复制全部文本内容粘贴进来；
+   - **Certificate**: 打开服务器上生成的 `server.crt`（或 `xxx_kikock_com.crt`），复制全部文本内容粘贴进来；
    - 点击 **Save** 保存。
 
 3. **配置反向代理规则 (Proxy Host)**：
