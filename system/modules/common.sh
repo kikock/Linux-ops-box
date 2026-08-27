@@ -100,15 +100,49 @@ _init_distro() {
             PKG_INSTALL="apk add"
             SVC_SSH="sshd"
             ;;
+        kylin|neokylin|ubuntukylin|uos|deepin|openeuler|euler)
+            if command -v apt &>/dev/null; then
+                DISTRO_FAMILY="debian"
+                PKG_MGR="apt"
+                PKG_UPDATE="apt update"
+                PKG_UPGRADE="apt upgrade -y"
+                PKG_INSTALL="apt install -y"
+                SVC_SSH="ssh"
+            elif command -v dnf &>/dev/null; then
+                DISTRO_FAMILY="redhat"
+                PKG_MGR="dnf"
+                PKG_UPDATE="dnf check-update"
+                PKG_UPGRADE="dnf upgrade -y"
+                PKG_INSTALL="dnf install -y"
+                SVC_SSH="sshd"
+            elif command -v yum &>/dev/null; then
+                DISTRO_FAMILY="redhat"
+                PKG_MGR="yum"
+                PKG_UPDATE="yum check-update"
+                PKG_UPGRADE="yum upgrade -y"
+                PKG_INSTALL="yum install -y"
+                SVC_SSH="sshd"
+            fi
+            ;;
         *)
-            if command -v apt &>/dev/null;   then PKG_MGR="apt";   DISTRO_FAMILY="debian"; fi
-            if command -v dnf &>/dev/null;   then PKG_MGR="dnf";   DISTRO_FAMILY="redhat"; fi
-            if command -v yum &>/dev/null;   then PKG_MGR="yum";   DISTRO_FAMILY="redhat"; fi
-            if command -v apk &>/dev/null;   then PKG_MGR="apk";   DISTRO_FAMILY="alpine"; fi
+            if command -v apt &>/dev/null;   then PKG_MGR="apt";   DISTRO_FAMILY="debian"; PKG_UPDATE="apt update"; PKG_UPGRADE="apt upgrade -y"; PKG_INSTALL="apt install -y"; SVC_SSH="ssh"; fi
+            if command -v dnf &>/dev/null;   then PKG_MGR="dnf";   DISTRO_FAMILY="redhat"; PKG_UPDATE="dnf check-update"; PKG_UPGRADE="dnf upgrade -y"; PKG_INSTALL="dnf install -y"; SVC_SSH="sshd"; fi
+            if command -v yum &>/dev/null;   then PKG_MGR="yum";   DISTRO_FAMILY="redhat"; PKG_UPDATE="yum check-update"; PKG_UPGRADE="yum upgrade -y"; PKG_INSTALL="yum install -y"; SVC_SSH="sshd"; fi
+            if command -v apk &>/dev/null;   then PKG_MGR="apk";   DISTRO_FAMILY="alpine"; PKG_UPDATE="apk update"; PKG_UPGRADE="apk upgrade"; PKG_INSTALL="apk add"; SVC_SSH="sshd"; fi
             ;;
     esac
 
-    # 复杂族系特判识别策略
+    # 复杂族系与国产信创特判识别策略
+    if [ -f /etc/kylin-release ] || grep -qi "kylin" /etc/os-release 2>/dev/null; then
+        if command -v dpkg &>/dev/null; then
+            DISTRO_FAMILY="debian"
+            [ "$PKG_MGR" = "unknown" ] && PKG_MGR="apt"
+        elif command -v rpm &>/dev/null; then
+            DISTRO_FAMILY="redhat"
+            [ "$PKG_MGR" = "unknown" ] && PKG_MGR="yum"
+        fi
+    fi
+
     if [ -f /etc/armbian-release ]; then
         DISTRO_FAMILY="debian"
         PKG_MGR="apt"
