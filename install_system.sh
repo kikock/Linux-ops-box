@@ -226,7 +226,7 @@ if [ -d "$SRC_DIR/modules" ]; then
     cp -rf "$SRC_DIR/modules" "$TARGET_OPT/"
 fi
 # 同步离线安装包或额外资源文件夹 (如 docker, nginx 等)
-for extra_dir in docker nginx static config db_manager; do
+for extra_dir in docker nginx static config db_manager packages; do
     if [ -d "$SRC_DIR/$extra_dir" ]; then
         cp -rf "$SRC_DIR/$extra_dir" "$TARGET_OPT/"
     fi

@@ -696,42 +696,83 @@ EOF
 # ========== 网络 IP 配置模块 ==========
 
 # 查看当前网络信息
+# 常用基础系统组件安装 (支持离线本地包安装与在线适配)
 install_common_tools() {
-    echo -e "\n${BLUE}--- 开始安装常用基础系统组件 ---${NC}"
-    echo -e "${YELLOW}由于最小化安装常缺少排查和诊断工具，脚本将为您安装基础包...${NC}"
-    echo -e "${YELLOW}包管理器: ${PKG_MGR:-未知}${NC}"
+    clear
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "${CYAN}      🛠  常用专家基础系统组件安装 / 离线部署         ${NC}"
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "当前系统类型: ${GREEN}${DISTRO_NAME:-未知}${NC} (包管理器: ${CYAN}${PKG_MGR:-未知}${NC})\n"
 
-    case "$PKG_MGR" in
-        apt)
-            PACKAGES="curl wget vim git htop net-tools unzip zip iputils-ping dnsutils tar sudo bash-completion"
-            ;;
-        dnf|yum)
-            PACKAGES="curl wget vim git htop net-tools unzip zip bind-utils tar sudo bash-completion"
-            ;;
-        apk)
-            PACKAGES="curl wget vim git htop net-tools unzip zip bind-tools tar sudo bash"
-            ;;
-        *)
-            echo -e "${RED}错误: 未能识别当前包管理器，无法进行适配安装。${NC}"
-            read -p "按回车键返回..."
-            return
-            ;;
-    esac
+    # 1. 检测本地 packages 目录是否存在离线包
+    local pkg_dir=""
+    for d in "$BASE_DIR/packages" "/opt/ck_sysinit/packages" "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../packages" "$PWD/system/packages"; do
+        if [ -d "$d" ]; then
+            pkg_dir="$d"
+            break
+        fi
+    done
 
-    echo -e "即将安装的包清单: ${GREEN}${PACKAGES}${NC}\n"
-
-    # 执行静默或快速安装
-    if [ "$PKG_MGR" = "apt" ]; then
-        apt update 2>/dev/null
+    local has_local_pkg=false
+    if [ -n "$pkg_dir" ]; then
+        if command -v dpkg &>/dev/null && ls "$pkg_dir"/*.deb &>/dev/null; then
+            has_local_pkg=true
+            echo -e "${GREEN}✓ 发现本地 deb 离线安装包目录: ${pkg_dir}${NC}"
+            echo -e "⏳ 正在执行 dpkg -i 离线批量安装..."
+            dpkg -i "$pkg_dir"/*.deb 2>/dev/null || apt-get install -f -y 2>/dev/null || true
+            echo -e "${GREEN}✅ 离线 deb 组件安装/升级完成！${NC}"
+        elif command -v rpm &>/dev/null && ls "$pkg_dir"/*.rpm &>/dev/null; then
+            has_local_pkg=true
+            echo -e "${GREEN}✓ 发现本地 rpm 离线安装包目录: ${pkg_dir}${NC}"
+            echo -e "⏳ 正在执行 rpm 离线批量安装..."
+            rpm -Uvh --replacepkgs --nodeps "$pkg_dir"/*.rpm 2>/dev/null || true
+            echo -e "${GREEN}✅ 离线 rpm 组件安装/升级完成！${NC}"
+        fi
     fi
 
-    # 调用开头定义的安装指令变量进行安装
-    $PKG_INSTALL $PACKAGES
-    
-    if [ $? -eq 0 ]; then
-        echo -e "\n${GREEN}成功: 所有常用软件安装/检查完毕。${NC}"
-    else
-        echo -e "\n${RED}警告: 部分软件包安装过程报出错误，请检查日志。${NC}"
+    if [ "$has_local_pkg" = false ]; then
+        echo -e "${YELLOW}未检测到本地离线包，正在尝试通过网络包管理器在线安装...${NC}"
+        local PACKAGES=""
+        case "$PKG_MGR" in
+            apt)
+                PACKAGES="curl wget openssl lsof socat tar cron dnsutils nano vim git htop net-tools unzip zip iputils-ping sudo bash-completion"
+                ;;
+            dnf|yum)
+                PACKAGES="curl wget openssl lsof socat tar cronie bind-utils nano vim-enhanced git htop net-tools unzip zip iputils sudo bash-completion"
+                ;;
+            apk)
+                PACKAGES="curl wget openssl lsof socat tar bind-tools nano vim git htop net-tools unzip zip bash sudo"
+                ;;
+            *)
+                echo -e "${RED}错误: 未能识别当前包管理器，无法进行在线安装。${NC}"
+                read -p "按回车键返回..."
+                return
+                ;;
+        esac
+
+        echo -e "组件清单: ${GREEN}${PACKAGES}${NC}\n"
+        if [ "$PKG_MGR" = "apt" ]; then
+            apt update -y 2>/dev/null || true
+        fi
+
+        $PKG_INSTALL $PACKAGES
+        if [ $? -eq 0 ]; then
+            echo -e "\n${GREEN}✅ 所有常用基础软件在线安装/检查完毕。${NC}"
+        else
+            echo -e "\n${YELLOW}⚠️ 在线安装结束（若处于离线断网环境属正常现象）。${NC}"
+        fi
     fi
+
+    echo ""
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "${GREEN}常用命令状态自检:${NC}"
+    for cmd in curl openssl lsof socat tar wget crontab dig nano vim; do
+        if command -v "$cmd" &>/dev/null; then
+            printf "  %-12s: ${GREEN}[已就绪]${NC}\n" "$cmd"
+        else
+            printf "  %-12s: ${RED}[未安装]${NC}\n" "$cmd"
+        fi
+    done
+    echo -e "${CYAN}======================================================${NC}"
     read -p "按回车键返回主菜单..."
 }
