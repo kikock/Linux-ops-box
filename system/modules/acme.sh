@@ -41,104 +41,142 @@ v4=$(curl -s4m5 icanhazip.com -k)
 v6=$(curl -s6m5 icanhazip.com -k)
 }
 
-if [ ! -f acyg_update ]; then
-green "首次安装必要的依赖……"
-if [[ x"${release}" == x"alpine" ]]; then
-apk add wget curl tar jq tzdata openssl expect git socat iproute2 virt-what
-else
-if [ -x "$(command -v apt-get)" ]; then
-apt update -y
-apt install socat -y
-apt install cron -y
-elif [ -x "$(command -v yum)" ]; then
-yum update -y && yum install epel-release -y
-yum install socat -y
-elif [ -x "$(command -v dnf)" ]; then
-dnf update -y
-dnf install socat -y
-fi
-if [[ $release = Centos && ${vsid} =~ 8 ]]; then
-cd /etc/yum.repos.d/ && mkdir -p backup && mv *repo backup/ 2>/dev/null || true
-curl -o /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-8.repo
-sed -i -e "s|mirrors.cloud.aliyuncs.com|mirrors.aliyun.com|g " /etc/yum.repos.d/CentOS-* 2>/dev/null || true
-sed -i -e "s|releasever|releasever-stream|g" /etc/yum.repos.d/CentOS-* 2>/dev/null || true
-yum clean all && yum makecache
-cd - >/dev/null 2>&1
-fi
-if [ -x "$(command -v yum)" ] || [ -x "$(command -v dnf)" ]; then
-if ! command -v "cronie" &> /dev/null; then
-if [ -x "$(command -v yum)" ]; then
-yum install -y cronie
-elif [ -x "$(command -v dnf)" ]; then
-dnf install -y cronie
-fi
-fi
-if ! command -v "dig" &> /dev/null; then
-if [ -x "$(command -v yum)" ]; then
-yum install -y bind-utils
-elif [ -x "$(command -v dnf)" ]; then
-dnf install -y bind-utils
-fi
-fi
-fi
-fi
+# ----------------------------------------------------------------
+# 依赖工具智能检测与离线自适应
+# ----------------------------------------------------------------
+_check_acme_deps(){
+    local missing_pkgs=()
+    local packages=("curl" "openssl" "lsof" "socat" "tar" "wget")
 
-packages=("curl" "openssl" "lsof" "socat" "dig" "tar" "wget")
-inspackages=("curl" "openssl" "lsof" "socat" "dnsutils" "tar" "wget")
-for i in "${!packages[@]}"; do
-package="${packages[$i]}"
-inspackage="${inspackages[$i]}"
-if ! command -v "$package" &> /dev/null; then
-if [ -x "$(command -v apt-get)" ]; then
-apt-get install -y "$inspackage"
-elif [ -x "$(command -v yum)" ]; then
-yum install -y "$inspackage"
-elif [ -x "$(command -v dnf)" ]; then
-dnf install -y "$inspackage"
-fi
-fi
-done
-touch acyg_update
-fi
+    for pkg in "${packages[@]}"; do
+        if ! command -v "$pkg" &>/dev/null; then
+            missing_pkgs+=("$pkg")
+        fi
+    done
 
-if [[ -z $(curl -s4m5 icanhazip.com -k) ]]; then
-yellow "检测到VPS为纯IPV6，添加dns64"
-echo -e "nameserver 2a00:1098:2b::1\nnameserver 2a00:1098:2c::1\nnameserver 2a01:4f8:c2c:123f::1" > /etc/resolv.conf
-sleep 2
+    # 检查 cron
+    if ! command -v crontab &>/dev/null; then
+        if [ "$release" = "Centos" ]; then
+            missing_pkgs+=("cronie")
+        else
+            missing_pkgs+=("cron")
+        fi
+    fi
+
+    # 检查 dig
+    if ! command -v dig &>/dev/null; then
+        if [ "$release" = "Centos" ]; then
+            missing_pkgs+=("bind-utils")
+        else
+            missing_pkgs+=("dnsutils")
+        fi
+    fi
+
+    # 如果所有依赖均已就绪，直接返回
+    if [ ${#missing_pkgs[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    yellow "检测到系统缺失部分工具: ${missing_pkgs[*]}，正在尝试自动安装..."
+    if [ -x "$(command -v apt-get)" ]; then
+        apt-get update -y 2>/dev/null || true
+        apt-get install -y "${missing_pkgs[@]}" 2>/dev/null || true
+    elif [ -x "$(command -v dnf)" ]; then
+        dnf install -y epel-release 2>/dev/null || true
+        dnf install -y "${missing_pkgs[@]}" 2>/dev/null || true
+    elif [ -x "$(command -v yum)" ]; then
+        yum install -y epel-release 2>/dev/null || true
+        yum install -y "${missing_pkgs[@]}" 2>/dev/null || true
+    elif [ -x "$(command -v apk)" ]; then
+        apk add "${missing_pkgs[@]}" 2>/dev/null || true
+    fi
+}
+
+_check_acme_deps
+
+if [[ -z $(curl -s4m2 icanhazip.com -k 2>/dev/null) ]]; then
+    if [ -f /etc/resolv.conf ] && ! grep -q "2a00:1098" /etc/resolv.conf 2>/dev/null; then
+        yellow "检测到VPS为纯IPV6或无法访问外网IPV4，配置dns64解析..."
+        echo -e "nameserver 2a00:1098:2b::1\nnameserver 2a00:1098:2c::1\nnameserver 2a01:4f8:c2c:123f::1" >> /etc/resolv.conf 2>/dev/null || true
+    fi
 fi
 
 acme2(){
-if [[ -n $(lsof -i :80|grep -v "PID") ]]; then
+if [[ -n $(lsof -i :80 2>/dev/null | grep -v "PID") ]]; then
 yellow "检测到80端口被占用，现执行80端口全释放"
-sleep 2
-lsof -i :80|grep -v "PID"|awk '{print "kill -9",$2}'|sh >/dev/null 2>&1
+sleep 1
+lsof -i :80 2>/dev/null | grep -v "PID" | awk '{print "kill -9",$2}' | sh >/dev/null 2>&1 || true
 green "80端口全释放完毕！"
-sleep 2
+sleep 1
 fi
 }
 
 acme3(){
 readp "请输入注册所需的邮箱（回车跳过则自动生成虚拟gmail邮箱）：" Aemail
-if [ -z $Aemail ]; then
-auto=`date +%s%N |md5sum | cut -c 1-6`
-Aemail=$auto@gmail.com
+if [ -z "$Aemail" ]; then
+auto=$(date +%s%N 2>/dev/null | md5sum | cut -c 1-6)
+[ -z "$auto" ] && auto="user$RANDOM"
+Aemail="${auto}@gmail.com"
 fi
 yellow "当前注册的邮箱名称：$Aemail"
-green "开始安装acme.sh申请证书脚本"
-bash ~/.acme.sh/acme.sh --uninstall >/dev/null 2>&1
-rm -rf ~/.acme.sh acme.sh
+
+# 检查是否已安装 acme.sh
+if [ -f "$HOME/.acme.sh/acme.sh" ] && [ -x "$HOME/.acme.sh/acme.sh" ]; then
+    green "✓ 检测到 acme.sh 引擎已就绪，跳过重复安装。"
+    return 0
+fi
+
+green "开始安装 acme.sh 证书申请引擎..."
+bash "$HOME/.acme.sh/acme.sh" --uninstall >/dev/null 2>&1 || true
+rm -rf "$HOME/.acme.sh" "$HOME/acme.sh" 2>/dev/null || true
 uncronac
-wget -N https://github.com/Neilpang/acme.sh/archive/master.tar.gz >/dev/null 2>&1
-tar -zxvf master.tar.gz >/dev/null 2>&1
-cd acme.sh-master >/dev/null 2>&1
-./acme.sh --install >/dev/null 2>&1
-cd - >/dev/null 2>&1
-curl https://get.acme.sh | sh -s email=$Aemail
-if [[ -n $(~/.acme.sh/acme.sh -v 2>/dev/null) ]]; then
-green "安装acme.sh证书申请程序成功"
-bash ~/.acme.sh/acme.sh --upgrade --use-wget --auto-upgrade
+
+# 1. 优先寻找本地离线静态包
+local LOCAL_TAR=""
+for p in \
+    "$BASE_DIR/static/acme.sh-master.tar.gz" \
+    "/opt/ck_sysinit/static/acme.sh-master.tar.gz" \
+    "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../static/acme.sh-master.tar.gz" \
+    "$PWD/system/static/acme.sh-master.tar.gz"; do
+    if [ -f "$p" ] && [ -s "$p" ]; then
+        LOCAL_TAR="$p"
+        break
+    fi
+done
+
+local install_ok=false
+
+if [ -n "$LOCAL_TAR" ]; then
+    green "✓ 发现本地离线安装包: ${LOCAL_TAR}，正在执行离线安装..."
+    local tmp_dir="/tmp/acme_install_$$"
+    mkdir -p "$tmp_dir"
+    tar -zxf "$LOCAL_TAR" -C "$tmp_dir" 2>/dev/null
+    local src_dir
+    src_dir=$(find "$tmp_dir" -maxdepth 2 -type d -name "*acme.sh*" | head -n 1)
+    if [ -n "$src_dir" ] && [ -f "$src_dir/acme.sh" ]; then
+        cd "$src_dir"
+        ./acme.sh --install --email "$Aemail" >/dev/null 2>&1
+        cd - >/dev/null 2>&1
+        [ -f "$HOME/.acme.sh/acme.sh" ] && install_ok=true
+    fi
+    rm -rf "$tmp_dir"
+fi
+
+# 2. 本地包不存在或安装失败时，从云端拉取
+if [ "$install_ok" = false ]; then
+    yellow "正在从云端下载安装 acme.sh 引擎..."
+    if command -v curl &>/dev/null; then
+        curl -fsSL https://get.acme.sh | sh -s email="$Aemail" >/dev/null 2>&1 || true
+    elif command -v wget &>/dev/null; then
+        wget -qO- https://get.acme.sh | sh -s email="$Aemail" >/dev/null 2>&1 || true
+    fi
+    [ -f "$HOME/.acme.sh/acme.sh" ] && install_ok=true
+fi
+
+if [ -f "$HOME/.acme.sh/acme.sh" ]; then
+    green "✓ 安装 acme.sh 证书申请程序成功！"
 else
-red "安装acme.sh证书申请程序失败" && exit
+    red "❌ 安装 acme.sh 证书申请程序失败，请检查网络或离线包。" && exit 1
 fi
 }
 
