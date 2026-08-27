@@ -60,6 +60,9 @@ fi
 if [ -f "$BASE_DIR/modules/acme.sh" ]; then
     source "$BASE_DIR/modules/acme.sh"
 fi
+if [ -f "$BASE_DIR/modules/disk_mgmt.sh" ]; then
+    source "$BASE_DIR/modules/disk_mgmt.sh"
+fi
 
 # ================================================================
 # 1. 静态环境参数自检 (只在启动时检索 1 次，缓存以提升性能)
@@ -376,11 +379,14 @@ while true; do
     echo " 15. SSL/TLS 自签证书中心 (SAN多域名/IP/泛域名/自建CA)"
     echo -e "${GREEN}══════════════ 💾  磁盘管理中心 ══════════════${NC}"
     echo " 14. 硬盘检测与清理中心   (使用率/大文件/大目录/清理)"
+    echo -e "${GREEN}══════════════ 💾  磁盘管理中心 ══════════════${NC}"
+    echo " 14. 硬盘检测与清理中心   (使用率/大文件/大目录/清理)"
     echo -e "${GREEN}══════════════ ⚙   工具箱管理   ══════════════${NC}"
     echo -e "${YELLOW} 12. ♻  在线更新工具箱${NC}"
     echo -e "${RED} 13. 🗑  卸载此工具箱${NC}"
     echo " 0.  退出工具箱"
     echo -e "${GREEN}==============================================${NC}"
+    read -p "请输入指令编号 [0-14]: " choice < /dev/tty
     read -p "请输入指令编号 [0-15]: " choice < /dev/tty
 
     case $choice in
@@ -407,6 +413,7 @@ while true; do
             fi
             ;;
         15) ssl_cert_menu ;;
+        14) disk_management_center ;;
         14) disk_management_center ;;
         12) _update_toolbox ;;
         13)
