@@ -39,17 +39,19 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 | 9 | **Docker 管理中心** | 安装/服务管理/Compose 编排 | `docker_mgmt.sh` |
 | 10 | **VNC 服务管理中心** | 一键安装 VNC / 桌面自启动 / 多端口多账户 | `vnc_mgmt.sh` |
 | 11 | **服务器代理配置** | Hosts 代理加速 / 环境变量代理 / Docker 镜像与信任 | `setup_proxy_registry.sh` |
-| 14 | **硬盘检测与清理中心** | 磁盘使用率 / 大文件 / 大目录 / 智能清理辅助 | `disk_mgmt.sh` |
-| 15 | **SSL/TLS 自签证书中心** | 交互式自签证书 / SAN 多域名与IP / 泛域名 / 自建私有根 CA | `ssl_cert.sh` |
-| 12 | **在线更新工具箱** | 自动探测最优下载通道并云端覆写 | 内置 |
-| 13 | **卸载工具箱** | 清理软链接与守护目录 | 内置 |
+| 12 | **SSL/TLS 证书管理中心** | ACME 联网商业证书申请 / 离线自签证书体系 / 私有根 CA | `ssl_cert.sh` / `acme.sh` |
+| 13 | **硬盘检测与清理中心** | 磁盘使用率 / 大文件 / 大目录 / 智能清理辅助 | `disk_mgmt.sh` |
+| 88 | **在线更新工具箱** | 自动探测最优下载通道并云端覆写 | 内置 |
+| 99 | **卸载工具箱** | 清理软链接与守护目录 | 内置 |
+| 0 | **退出工具箱** | 退出管理程序 | 内置 |
 
 ### 辅助模块体系:
 
 | 模块文件 | 职能描述 |
 |:---|:---|
 | `common.sh` | 全局底座：颜色规范、双写审计日志 (`/var/log/ck_system_init.log`)、跨平台发行版自检 `_init_distro()` |
-| `ssl_cert.sh` | SSL/TLS 自签证书中心：极速一键自签、专家级 SAN (IP/多域名/通配符)、私有根 CA 签发与系统信任、PFX/PEM 格式互转、证书公私钥配对诊断 |
+| `ssl_cert.sh` | SSL/TLS 证书管理中心：融合 ACME 联网申请与离线自签、专家级 SAN (IP/多域名/通配符)、私有根 CA 签发、PFX/PEM 格式互转、密钥对配对诊断 |
+| `acme.sh` | ACME 证书自动化引擎：支持 Let's Encrypt / ZeroSSL、IP 证书、80 端口单域名与 DNS API 泛域名申请及自动续期 |
 | `disk_mgmt.sh` | 硬盘检测与清理中心模块：多挂载点使用率图示、Top N 大文件/大目录扫描、分类占用统计与一键清理 |
 | `ecs.sh` | ECS/云服务器专项运维工具集（性能监控大屏、IO 分析等） |
 | `sing-box-plus.sh` | Sing-Box 代理管理集成模块（安装/配置/订阅管理） |

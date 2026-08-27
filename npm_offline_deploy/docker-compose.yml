@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  app:
+    image: 'jc21/nginx-proxy-manager:latest'
+    container_name: 'npm_app'
+    restart: unless-stopped
+    ports:
+      - '80:80'       # HTTP 入口
+      - '443:443'     # HTTPS 入口
+      - '81:81'       # NPM Web 管理后台
+    environment:
+      DISABLE_IPV6: 'true'
+    volumes:
+      - ./data:/data
+      - ./letsencrypt:/etc/letsencrypt
+      - ./certs:/certs:ro   # 挂载离线生成的自签证书目录
+    extra_hosts:
+      # 允许 NPM 容器通过 host.docker.internal 访问宿主机上映射的 8080 等本地端口
+      - "host.docker.internal:host-gateway"
