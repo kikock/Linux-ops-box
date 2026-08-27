@@ -3,7 +3,7 @@ version: '3.8'
 services:
   app:
     image: 'jc21/nginx-proxy-manager:latest'
-    container_name: 'npm_app'
+    container_name: 'nginx-proxy'
     restart: unless-stopped
     ports:
       - '80:80'       # HTTP 入口

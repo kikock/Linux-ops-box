@@ -68,10 +68,10 @@ elif docker compose version &>/dev/null; then
     docker compose up -d
 else
     # 纯 Docker 启动兼容
-    docker stop npm_app 2>/dev/null || true
-    docker rm npm_app 2>/dev/null || true
+    docker stop nginx-proxy 2>/dev/null || true
+    docker rm nginx-proxy 2>/dev/null || true
     docker run -d \
-      --name npm_app \
+      --name nginx-proxy \
       --restart unless-stopped \
       --add-host host.docker.internal:host-gateway \
       -p 80:80 \
