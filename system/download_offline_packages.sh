@@ -25,10 +25,12 @@ echo -e "${CYAN}======================================================${NC}"
 
 # 检测当前包管理工具
 if command -v apt-get &>/dev/null; then
+    local_sub="$PKG_DIR/deb"
+    mkdir -p "$local_sub"
     echo -e "${GREEN}检测到 Debian/Ubuntu (APT) 环境${NC}"
-    echo -e "⏳ 正在更新软件索引并下载 .deb 离线包到: ${CYAN}${PKG_DIR}${NC} ..."
+    echo -e "⏳ 正在更新软件索引并下载 .deb 离线包到: ${CYAN}${local_sub}${NC} ..."
     apt-get update -y 2>/dev/null || true
-    cd "$PKG_DIR"
+    cd "$local_sub"
     
     DEB_LIST=(curl openssl lsof socat tar wget cron dnsutils nano vim htop net-tools unzip zip)
     echo -e "下载目标: ${YELLOW}${DEB_LIST[*]}${NC}"
@@ -44,19 +46,21 @@ if command -v apt-get &>/dev/null; then
     cd - >/dev/null
 
 elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+    local_sub="$PKG_DIR/rpm"
+    mkdir -p "$local_sub"
     echo -e "${GREEN}检测到 CentOS/RHEL/Rocky/Alma (YUM/DNF) 环境${NC}"
-    echo -e "⏳ 正在下载 .rpm 离线包到: ${CYAN}${PKG_DIR}${NC} ..."
+    echo -e "⏳ 正在下载 .rpm 离线包到: ${CYAN}${local_sub}${NC} ..."
     
     RPM_LIST=(curl openssl lsof socat tar wget cronie bind-utils nano vim-enhanced htop net-tools unzip zip)
     echo -e "下载目标: ${YELLOW}${RPM_LIST[*]}${NC}"
     
     if command -v dnf &>/dev/null; then
-        dnf download --destdir="$PKG_DIR" --resolve "${RPM_LIST[@]}" 2>/dev/null || true
+        dnf download --destdir="$local_sub" --resolve "${RPM_LIST[@]}" 2>/dev/null || true
     elif command -v yumdownloader &>/dev/null; then
-        yumdownloader --destdir="$PKG_DIR" --resolve "${RPM_LIST[@]}" 2>/dev/null || true
+        yumdownloader --destdir="$local_sub" --resolve "${RPM_LIST[@]}" 2>/dev/null || true
     else
         yum install -y yum-utils 2>/dev/null || true
-        yumdownloader --destdir="$PKG_DIR" --resolve "${RPM_LIST[@]}" 2>/dev/null || true
+        yumdownloader --destdir="$local_sub" --resolve "${RPM_LIST[@]}" 2>/dev/null || true
     fi
 
 else

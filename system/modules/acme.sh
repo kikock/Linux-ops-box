@@ -73,7 +73,7 @@ _check_acme_deps(){
         return 0
     fi
 
-    # 1. 尝试从本地 packages/ 目录离线安装 deb/rpm
+    # 1. 尝试从本地 packages/ 目录离线安装 deb/rpm (支持 deb/rpm 子目录与平铺目录)
     local pkg_dir=""
     for d in "$BASE_DIR/packages" "/opt/ck_sysinit/packages" "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../packages"; do
         if [ -d "$d" ]; then
@@ -83,14 +83,24 @@ _check_acme_deps(){
     done
 
     if [ -n "$pkg_dir" ]; then
-        if command -v dpkg &>/dev/null && ls "$pkg_dir"/*.deb &>/dev/null; then
-            yellow "正在从本地 packages 目录离线安装 deb 依赖包..."
-            dpkg -i "$pkg_dir"/*.deb 2>/dev/null || true
-            return 0
-        elif command -v rpm &>/dev/null && ls "$pkg_dir"/*.rpm &>/dev/null; then
-            yellow "正在从本地 packages 目录离线安装 rpm 依赖包..."
-            rpm -ivh --nodeps "$pkg_dir"/*.rpm 2>/dev/null || true
-            return 0
+        if command -v dpkg &>/dev/null; then
+            local deb_source=""
+            [ -d "$pkg_dir/deb" ] && ls "$pkg_dir/deb"/*.deb &>/dev/null && deb_source="$pkg_dir/deb"
+            [ -z "$deb_source" ] && ls "$pkg_dir"/*.deb &>/dev/null && deb_source="$pkg_dir"
+            if [ -n "$deb_source" ]; then
+                yellow "正在从本地 packages 目录离线安装 deb 依赖包..."
+                dpkg -i "$deb_source"/*.deb 2>/dev/null || true
+                return 0
+            fi
+        elif command -v rpm &>/dev/null; then
+            local rpm_source=""
+            [ -d "$pkg_dir/rpm" ] && ls "$pkg_dir/rpm"/*.rpm &>/dev/null && rpm_source="$pkg_dir/rpm"
+            [ -z "$rpm_source" ] && ls "$pkg_dir"/*.rpm &>/dev/null && rpm_source="$pkg_dir"
+            if [ -n "$rpm_source" ]; then
+                yellow "正在从本地 packages 目录离线安装 rpm 依赖包..."
+                rpm -ivh --nodeps "$rpm_source"/*.rpm 2>/dev/null || true
+                return 0
+            fi
         fi
     fi
 

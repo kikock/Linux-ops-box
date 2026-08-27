@@ -704,7 +704,7 @@ install_common_tools() {
     echo -e "${CYAN}======================================================${NC}"
     echo -e "当前系统类型: ${GREEN}${DISTRO_NAME:-未知}${NC} (包管理器: ${CYAN}${PKG_MGR:-未知}${NC})\n"
 
-    # 1. 检测本地 packages 目录是否存在离线包
+    # 1. 检测本地 packages 目录是否存在离线包 (支持 deb / rpm 分类与平铺结构)
     local pkg_dir=""
     for d in "$BASE_DIR/packages" "/opt/ck_sysinit/packages" "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../packages" "$PWD/system/packages"; do
         if [ -d "$d" ]; then
@@ -715,18 +715,34 @@ install_common_tools() {
 
     local has_local_pkg=false
     if [ -n "$pkg_dir" ]; then
-        if command -v dpkg &>/dev/null && ls "$pkg_dir"/*.deb &>/dev/null; then
-            has_local_pkg=true
-            echo -e "${GREEN}✓ 发现本地 deb 离线安装包目录: ${pkg_dir}${NC}"
-            echo -e "⏳ 正在执行 dpkg -i 离线批量安装..."
-            dpkg -i "$pkg_dir"/*.deb 2>/dev/null || apt-get install -f -y 2>/dev/null || true
-            echo -e "${GREEN}✅ 离线 deb 组件安装/升级完成！${NC}"
-        elif command -v rpm &>/dev/null && ls "$pkg_dir"/*.rpm &>/dev/null; then
-            has_local_pkg=true
-            echo -e "${GREEN}✓ 发现本地 rpm 离线安装包目录: ${pkg_dir}${NC}"
-            echo -e "⏳ 正在执行 rpm 离线批量安装..."
-            rpm -Uvh --replacepkgs --nodeps "$pkg_dir"/*.rpm 2>/dev/null || true
-            echo -e "${GREEN}✅ 离线 rpm 组件安装/升级完成！${NC}"
+        if command -v dpkg &>/dev/null; then
+            local deb_source=""
+            if [ -d "$pkg_dir/deb" ] && ls "$pkg_dir/deb"/*.deb &>/dev/null; then
+                deb_source="$pkg_dir/deb"
+            elif ls "$pkg_dir"/*.deb &>/dev/null; then
+                deb_source="$pkg_dir"
+            fi
+            if [ -n "$deb_source" ]; then
+                has_local_pkg=true
+                echo -e "${GREEN}✓ 发现本地 deb 离线安装包目录: ${deb_source}${NC}"
+                echo -e "⏳ 正在执行 dpkg -i 离线批量安装..."
+                dpkg -i "$deb_source"/*.deb 2>/dev/null || apt-get install -f -y 2>/dev/null || true
+                echo -e "${GREEN}✅ 离线 deb 组件安装/升级完成！${NC}"
+            fi
+        elif command -v rpm &>/dev/null; then
+            local rpm_source=""
+            if [ -d "$pkg_dir/rpm" ] && ls "$pkg_dir/rpm"/*.rpm &>/dev/null; then
+                rpm_source="$pkg_dir/rpm"
+            elif ls "$pkg_dir"/*.rpm &>/dev/null; then
+                rpm_source="$pkg_dir"
+            fi
+            if [ -n "$rpm_source" ]; then
+                has_local_pkg=true
+                echo -e "${GREEN}✓ 发现本地 rpm 离线安装包目录: ${rpm_source}${NC}"
+                echo -e "⏳ 正在执行 rpm 离线批量安装..."
+                rpm -Uvh --replacepkgs --nodeps "$rpm_source"/*.rpm 2>/dev/null || true
+                echo -e "${GREEN}✅ 离线 rpm 组件安装/升级完成！${NC}"
+            fi
         fi
     fi
 
