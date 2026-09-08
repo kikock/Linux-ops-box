@@ -11,30 +11,53 @@ white(){ echo -e "\033[37m\033[01m$1\033[0m";}
 readp(){ read -p "$(yellow "$1")" $2;}
 [[ $EUID -ne 0 ]] && yellow "请以root模式运行脚本" && exit
 
-if [[ -f /etc/redhat-release ]]; then
-release="Centos"
-elif cat /etc/issue | grep -q -E -i "alpine"; then
-release="alpine"
-elif cat /etc/issue | grep -q -E -i "debian"; then
-release="Debian"
-elif cat /etc/issue | grep -q -E -i "ubuntu"; then
-release="Ubuntu"
-elif cat /etc/issue | grep -q -E -i "centos|red hat|redhat"; then
-release="Centos"
-elif cat /proc/version | grep -q -E -i "debian"; then
-release="Debian"
-elif cat /proc/version | grep -q -E -i "ubuntu"; then
-release="Ubuntu"
-elif cat /proc/version | grep -q -E -i "centos|red hat|redhat"; then
-release="Centos"
-else 
-red "不支持当前的系统，请选择使用Ubuntu,Debian,Centos系统" && exit 
+# ----------------------------------------------------------------
+# 发行版自适应识别（深度融合 common.sh，全面支持银河麒麟/统信UOS等信创环境）
+# ----------------------------------------------------------------
+release=""
+if [ -n "${DISTRO_FAMILY:-}" ]; then
+    case "$DISTRO_FAMILY" in
+        debian) release="Debian" ;;
+        redhat) release="Centos" ;;
+        alpine) release="alpine" ;;
+    esac
 fi
+
+# 若未从 common.sh 继承，则回退到特征检测
+if [ -z "$release" ]; then
+    if [ -f /etc/kylin-release ] || grep -qi "kylin\|银河麒麟\|中标麒麟" /etc/os-release 2>/dev/null; then
+        # 银河麒麟/中标麒麟：根据底层包管理器判断（桌面版/Ubuntu Kylin 为 Debian 底座，Server RPM 为 Centos 底座）
+        if command -v apt &>/dev/null; then
+            release="Debian"
+        else
+            release="Centos"
+        fi
+    elif grep -qi "uos\|deepin" /etc/os-release 2>/dev/null; then
+        release="Debian"
+    elif grep -qi "openeuler\|euleros\|anolis" /etc/os-release 2>/dev/null; then
+        release="Centos"
+    elif [ -f /etc/redhat-release ] || grep -qi "centos\|rhel\|red hat\|fedora\|rocky\|almalinux" /etc/os-release 2>/dev/null; then
+        release="Centos"
+    elif grep -qi "ubuntu" /etc/os-release 2>/dev/null || grep -qi "ubuntu" /etc/issue 2>/dev/null; then
+        release="Ubuntu"
+    elif grep -qi "debian" /etc/os-release 2>/dev/null || grep -qi "debian" /etc/issue 2>/dev/null; then
+        release="Debian"
+    elif grep -qi "alpine" /etc/os-release 2>/dev/null || grep -qi "alpine" /etc/issue 2>/dev/null; then
+        release="alpine"
+    elif command -v apt &>/dev/null; then
+        release="Debian"
+    elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+        release="Centos"
+    elif command -v apk &>/dev/null; then
+        release="alpine"
+    else
+        # 兜底默认设为 Debian，绝不在模块引入时强杀主程序
+        release="Debian"
+    fi
+fi
+
 vsid=$(grep -i version_id /etc/os-release 2>/dev/null | cut -d \" -f2 | cut -d . -f1)
 op=$(cat /etc/redhat-release 2>/dev/null || cat /etc/os-release 2>/dev/null | grep -i pretty_name | cut -d \" -f2)
-if [[ $(echo "$op" | grep -i -E "arch") ]]; then
-red "脚本不支持当前的 $op 系统，请选择使用Ubuntu,Debian,Centos系统。" && exit
-fi
 
 v4v6(){
 v4=$(curl -s4m5 icanhazip.com -k)
