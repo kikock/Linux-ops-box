@@ -5,6 +5,8 @@
 # 适用环境: 【有互联网连接的 Linux 电脑】
 # 描述: 自动下载 curl, openssl, lsof, socat, tar, wget, cron, dig, nano
 #       等常用工具的离线安装包 (.deb / .rpm) 到 system/packages 目录
+# 适配: Ubuntu / Debian / 银河麒麟 / 统信 UOS / Deepin /
+#          CentOS / RHEL / Rocky / openEuler / Anolis OS
 # =================================================================
 
 set -e
@@ -23,11 +25,21 @@ echo -e "${CYAN}======================================================${NC}"
 echo -e "${CYAN}      📦 常用基础组件离线安装包批量下载工具          ${NC}"
 echo -e "${CYAN}======================================================${NC}"
 
-# 检测当前包管理工具
+# 识别当前包管理工具
+DISTRO_LABEL="未知"
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    DISTRO_LABEL="${PRETTY_NAME:-${ID:-未知}}"
+fi
 if command -v apt-get &>/dev/null; then
     local_sub="$PKG_DIR/deb"
     mkdir -p "$local_sub"
-    echo -e "${GREEN}检测到 Debian/Ubuntu (APT) 环境${NC}"
+    # 识别具体发行版给出友好提示
+    case "$(echo "${ID:-}" | tr '[:upper:]' '[:lower:]')" in
+        kylin|ubuntukylin|neokylin) echo -e "${GREEN}检测到 麒麟系 (银河麒麟/中标麒麟/Ubuntu Kylin) APT 环境${NC}" ;;
+        uos|uniontechos|deepin*)    echo -e "${GREEN}检测到 统信 UOS / Deepin APT 环境${NC}" ;;
+        *)                          echo -e "${GREEN}检测到 Debian/Ubuntu (APT) 环境${NC}" ;;
+    esac
     echo -e "⏳ 正在更新软件索引并下载 .deb 离线包到: ${CYAN}${local_sub}${NC} ..."
     apt-get update -y 2>/dev/null || true
     cd "$local_sub"
@@ -48,7 +60,13 @@ if command -v apt-get &>/dev/null; then
 elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
     local_sub="$PKG_DIR/rpm"
     mkdir -p "$local_sub"
-    echo -e "${GREEN}检测到 CentOS/RHEL/Rocky/Alma (YUM/DNF) 环境${NC}"
+    # 识别具体 RPM 发行版给出友好提示
+    case "$(echo "${ID:-}" | tr '[:upper:]' '[:lower:]')" in
+        kylin)                    echo -e "${GREEN}检测到 银河麒麟 V10 Server (YUM/DNF) 环境${NC}" ;;
+        openeuler|euler|euleros) echo -e "${GREEN}检测到 openEuler/EulerOS (YUM/DNF) 环境${NC}" ;;
+        anolis|tencentos)         echo -e "${GREEN}检测到 Anolis OS/TencentOS (YUM/DNF) 环境${NC}" ;;
+        *)                        echo -e "${GREEN}检测到 CentOS/RHEL/Rocky/Alma (YUM/DNF) 环境${NC}" ;;
+    esac
     echo -e "⏳ 正在下载 .rpm 离线包到: ${CYAN}${local_sub}${NC} ..."
     
     RPM_LIST=(curl openssl lsof socat tar wget cronie bind-utils nano vim-enhanced htop net-tools unzip zip)
@@ -64,7 +82,7 @@ elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
     fi
 
 else
-    echo -e "${RED}错误: 未能识别当前包管理器，仅支持 Debian/Ubuntu 或 CentOS/RHEL。${NC}"
+    echo -e "${RED}错误: 未能识别当前包管理器，仅支持 Debian/Ubuntu/麒麟/UOS 或 CentOS/RHEL/openEuler/Anolis。${NC}"
     exit 1
 fi
 

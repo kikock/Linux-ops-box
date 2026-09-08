@@ -37,14 +37,13 @@ _time_header() {
 # ================================================================
 _bash_ntp_probe() {
     local host="${1:-127.0.0.1}"
-    local timeout=3
-    # 48 字节 NTP v3 客户端请求（LI=0, VN=3, Mode=3）
-    local ntp_pkt
-    ntp_pkt=$(printf '\x1b\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00')
+    local port="${2:-123}"
+    local timeout="${3:-3}"
     # 尝试打开 UDP 套接字（/dev/udp 是 Bash 内置虚拟文件）
-    exec 9<>/dev/udp/${host}/123 2>/dev/null || return 1
-    # 发送请求
-    printf '%s' "$ntp_pkt" >&9 2>/dev/null || { exec 9>&-; return 1; }
+    exec 9<>/dev/udp/${host}/${port} 2>/dev/null || return 1
+    # 直接写入 48 字节 NTP v3 客户端请求（LI=0, VN=3, Mode=3）
+    printf '\x1b\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00' >&9 2>/dev/null \
+        || { exec 9>&-; return 1; }
     # 等待响应（read -t 超时读 1 字节）
     local resp
     IFS= read -r -t "$timeout" -d '' -n 1 resp <&9 2>/dev/null
@@ -476,153 +475,288 @@ _check_ntp_health() {
     _time_header "NTP 服务器健康状态检测"
     echo ""
 
+    echo -e "${YELLOW}请选择或输入要检测的 NTP 服务器目标:${NC}"
+    echo -e "  1. 本机 NTP 服务 (127.0.0.1:123)"
+    echo -e "  2. 自定义其他服务器 (可输入 IP 或 IP:端口)"
+    echo ""
+    read -p "  请选择模式 [1-2，直接回车=1]: " target_mode_choice < /dev/tty
+    target_mode_choice="${target_mode_choice:-1}"
+
+    local raw_target="127.0.0.1:123"
+    if [ "$target_mode_choice" = "2" ]; then
+        echo ""
+        echo -e "  ${CYAN}请输入目标 NTP 服务器地址与端口（如: 192.168.1.100 或 192.168.1.100:123）:${NC}"
+        read -p "  目标服务器 [直接回车=127.0.0.1:123]: " user_target < /dev/tty
+        [ -n "$user_target" ] && raw_target="$user_target"
+    fi
+
+    # 去除空格并解析 IP/域名 与 端口
+    raw_target=$(echo "$raw_target" | tr -d ' ')
     local ntp_target="127.0.0.1"
+    local ntp_port="123"
+
+    if [[ "$raw_target" == *":"* ]]; then
+        ntp_target="${raw_target%%:*}"
+        ntp_port="${raw_target##*:}"
+    else
+        ntp_target="$raw_target"
+        ntp_port="123"
+    fi
+    ntp_target="${ntp_target:-127.0.0.1}"
+    ntp_port="${ntp_port:-123}"
+
+    # 判断是否为本机目标
+    local is_local=false
+    if [ "$ntp_target" = "127.0.0.1" ] || [ "$ntp_target" = "localhost" ] || [ "$ntp_target" = "::1" ]; then
+        is_local=true
+    else
+        if command -v hostname &>/dev/null && hostname -I 2>/dev/null | grep -qw "$ntp_target"; then
+            is_local=true
+        elif command -v ip &>/dev/null && ip -o addr 2>/dev/null | grep -qw "$ntp_target"; then
+            is_local=true
+        fi
+    fi
+
+    echo ""
+    echo -e "  ${BLUE}🎯 检测目标: ${CYAN}${ntp_target}:${ntp_port}${NC} $([ "$is_local" = true ] && echo -e "${GREEN}(本机)${NC}" || echo -e "${YELLOW}(远程服务器)${NC}")"
+    echo -e "  ${CYAN}──────────────────────────────────────────────────${NC}"
+    echo ""
+
     local overall_ok=true
-
-    # --- 3.1 Docker 容器状态 ---
-    echo -e "${BLUE}[1/4] 检查 Docker NTP 容器状态...${NC}"
-    if ! command -v docker &>/dev/null; then
-        echo -e "  ${YELLOW}⚠ Docker 未安装，跳过容器状态检查${NC}"
-    else
-        local cstatus
-        cstatus=$(docker inspect --format='{{.State.Status}}' "$_NTP_CONTAINER_NAME" 2>/dev/null)
-        if [ -z "$cstatus" ]; then
-            echo -e "  ${YELLOW}⚠ NTP 容器 [${_NTP_CONTAINER_NAME}] 不存在（尚未部署）${NC}"
-            overall_ok=false
-        elif [ "$cstatus" = "running" ]; then
-            local cstart cimage cup
-            cstart=$(docker inspect --format='{{.State.StartedAt}}' "$_NTP_CONTAINER_NAME" 2>/dev/null | cut -c1-19 | tr 'T' ' ')
-            cimage=$(docker inspect --format='{{.Config.Image}}' "$_NTP_CONTAINER_NAME" 2>/dev/null)
-            echo -e "  ${GREEN}✓ 容器状态: running${NC}"
-            echo -e "  ${CYAN}  镜像: ${cimage}${NC}"
-            echo -e "  ${CYAN}  启动时间: ${cstart} UTC${NC}"
-            # 最后 5 行日志
-            echo -e "  ${CYAN}  最新日志:${NC}"
-            docker logs --tail 5 "$_NTP_CONTAINER_NAME" 2>&1 | while IFS= read -r line; do
-                echo -e "    ${BLUE}│${NC} $line"
-            done
-        else
-            echo -e "  ${RED}✗ 容器状态: ${cstatus}（异常）${NC}"
-            overall_ok=false
-        fi
-    fi
-    echo ""
-
-    # --- 3.2 UDP 123 端口连通性 ---
-    echo -e "${BLUE}[2/4] 检测 UDP 123 端口连通性...${NC}"
     local udp_ok=false
-    if command -v ss &>/dev/null; then
-        if ss -ulnp 2>/dev/null | grep -q ':123 '; then
-            echo -e "  ${GREEN}✓ UDP 123 端口正在监听${NC}"
-            udp_ok=true
-        else
-            echo -e "  ${RED}✗ UDP 123 端口未监听${NC}"
-            overall_ok=false
-        fi
-    elif command -v netstat &>/dev/null; then
-        if netstat -ulnp 2>/dev/null | grep -q ':123 '; then
-            echo -e "  ${GREEN}✓ UDP 123 端口正在监听${NC}"
-            udp_ok=true
-        else
-            echo -e "  ${RED}✗ UDP 123 端口未监听${NC}"
-            overall_ok=false
-        fi
-    else
-        echo -e "  ${YELLOW}⚠ 无法检测（缺少 ss/netstat 命令）${NC}"
-    fi
-    echo ""
-
-    # --- 3.3 NTP 协议层探测 ---
-    echo -e "${BLUE}[3/4] NTP 协议层探测...${NC}"
     local ntp_proto_ok=false
 
-    # 检测可用工具
-    local _has_ntpdate _has_ntpq _has_chronyc
-    command -v ntpdate &>/dev/null && _has_ntpdate=true || _has_ntpdate=false
-    command -v ntpq    &>/dev/null && _has_ntpq=true    || _has_ntpq=false
-    command -v chronyc &>/dev/null && _has_chronyc=true || _has_chronyc=false
+    if [ "$is_local" = true ]; then
+        # ============================================================
+        # 模式 A：检测本机 NTP 服务
+        # ============================================================
 
-    if [ "$_has_ntpdate" = true ]; then
-        echo -e "  ${CYAN}▶ 使用 ntpdate -q 探测 ${ntp_target}:${NC}"
-        local ntpout
-        ntpout=$(ntpdate -q "$ntp_target" 2>&1)
-        if echo "$ntpout" | grep -qE "server .*, stratum|offset"; then
-            echo -e "  ${GREEN}✓ ntpdate 协议探测成功${NC}"
-            echo "$ntpout" | grep -E "server|offset" | head -3 | while IFS= read -r line; do
-                echo -e "    ${BLUE}│${NC} $line"
-            done
-            ntp_proto_ok=true
+        # --- 3.1 Docker 容器状态 ---
+        echo -e "${BLUE}[1/4] 检查 Docker NTP 容器状态...${NC}"
+        if ! command -v docker &>/dev/null; then
+            echo -e "  ${YELLOW}⚠ Docker 未安装，跳过容器状态检查${NC}"
         else
-            echo -e "  ${YELLOW}⚠ ntpdate 响应: $(echo "$ntpout" | head -2)${NC}"
+            local cstatus
+            cstatus=$(docker inspect --format='{{.State.Status}}' "$_NTP_CONTAINER_NAME" 2>/dev/null)
+            if [ -z "$cstatus" ]; then
+                echo -e "  ${YELLOW}⚠ NTP 容器 [${_NTP_CONTAINER_NAME}] 不存在（尚未部署）${NC}"
+                overall_ok=false
+            elif [ "$cstatus" = "running" ]; then
+                local cstart cimage cup
+                cstart=$(docker inspect --format='{{.State.StartedAt}}' "$_NTP_CONTAINER_NAME" 2>/dev/null | cut -c1-19 | tr 'T' ' ')
+                cimage=$(docker inspect --format='{{.Config.Image}}' "$_NTP_CONTAINER_NAME" 2>/dev/null)
+                echo -e "  ${GREEN}✓ 容器状态: running${NC}"
+                echo -e "  ${CYAN}  镜像: ${cimage}${NC}"
+                echo -e "  ${CYAN}  启动时间: ${cstart} UTC${NC}"
+                echo -e "  ${CYAN}  最新日志:${NC}"
+                docker logs --tail 5 "$_NTP_CONTAINER_NAME" 2>&1 | while IFS= read -r line; do
+                    echo -e "    ${BLUE}│${NC} $line"
+                done
+            else
+                echo -e "  ${RED}✗ 容器状态: ${cstatus}（异常）${NC}"
+                overall_ok=false
+            fi
         fi
+        echo ""
 
-    elif [ "$_has_ntpq" = true ]; then
-        echo -e "  ${CYAN}▶ 使用 ntpq -p 探测 ${ntp_target}:${NC}"
-        local ntpq_out
-        ntpq_out=$(ntpq -p "$ntp_target" 2>&1)
-        if [ $? -eq 0 ]; then
-            echo -e "  ${GREEN}✓ ntpq 响应正常${NC}"
-            echo "$ntpq_out" | head -8 | while IFS= read -r line; do
-                echo -e "    ${BLUE}│${NC} $line"
-            done
-            ntp_proto_ok=true
+        # --- 3.2 UDP 端口连通性 ---
+        echo -e "${BLUE}[2/4] 检测本机 UDP ${ntp_port} 端口连通性...${NC}"
+        if command -v ss &>/dev/null; then
+            if ss -ulnp 2>/dev/null | grep -q ":${ntp_port} "; then
+                echo -e "  ${GREEN}✓ UDP ${ntp_port} 端口正在监听${NC}"
+                udp_ok=true
+            else
+                echo -e "  ${RED}✗ UDP ${ntp_port} 端口未监听${NC}"
+                overall_ok=false
+            fi
+        elif command -v netstat &>/dev/null; then
+            if netstat -ulnp 2>/dev/null | grep -q ":${ntp_port} "; then
+                echo -e "  ${GREEN}✓ UDP ${ntp_port} 端口正在监听${NC}"
+                udp_ok=true
+            else
+                echo -e "  ${RED}✗ UDP ${ntp_port} 端口未监听${NC}"
+                overall_ok=false
+            fi
         else
-            echo -e "  ${YELLOW}⚠ ntpq 无响应: ${ntpq_out}${NC}"
+            echo -e "  ${YELLOW}⚠ 无法检测（缺少 ss/netstat 命令）${NC}"
         fi
+        echo ""
 
-    elif [ "$_has_chronyc" = true ]; then
-        echo -e "  ${CYAN}▶ 使用 chronyc tracking 检测本机同步:${NC}"
-        local chrony_out
-        chrony_out=$(chronyc tracking 2>&1)
-        if [ $? -eq 0 ]; then
-            echo -e "  ${GREEN}✓ chronyc 响应正常${NC}"
-            echo "$chrony_out" | head -6 | while IFS= read -r line; do
-                echo -e "    ${BLUE}│${NC} $line"
-            done
-            ntp_proto_ok=true
+        # --- 3.3 NTP 协议层探测 ---
+        echo -e "${BLUE}[3/4] NTP 协议层探测...${NC}"
+        local _has_ntpdate _has_ntpq _has_chronyc
+        command -v ntpdate &>/dev/null && _has_ntpdate=true || _has_ntpdate=false
+        command -v ntpq    &>/dev/null && _has_ntpq=true    || _has_ntpq=false
+        command -v chronyc &>/dev/null && _has_chronyc=true || _has_chronyc=false
+
+        if [ "$ntp_port" = "123" ] && [ "$_has_ntpdate" = true ]; then
+            echo -e "  ${CYAN}▶ 使用 ntpdate -q 探测 ${ntp_target}:${NC}"
+            local ntpout
+            ntpout=$(ntpdate -q "$ntp_target" 2>&1)
+            if echo "$ntpout" | grep -qE "server .*, stratum|offset"; then
+                echo -e "  ${GREEN}✓ ntpdate 协议探测成功${NC}"
+                echo "$ntpout" | grep -E "server|offset" | head -3 | while IFS= read -r line; do
+                    echo -e "    ${BLUE}│${NC} $line"
+                done
+                ntp_proto_ok=true
+            else
+                echo -e "  ${YELLOW}⚠ ntpdate 响应: $(echo "$ntpout" | head -2)${NC}"
+            fi
+        elif [ "$ntp_port" = "123" ] && [ "$_has_ntpq" = true ]; then
+            echo -e "  ${CYAN}▶ 使用 ntpq -p 探测 ${ntp_target}:${NC}"
+            local ntpq_out
+            ntpq_out=$(ntpq -p "$ntp_target" 2>&1)
+            if [ $? -eq 0 ]; then
+                echo -e "  ${GREEN}✓ ntpq 响应正常${NC}"
+                echo "$ntpq_out" | head -8 | while IFS= read -r line; do
+                    echo -e "    ${BLUE}│${NC} $line"
+                done
+                ntp_proto_ok=true
+            else
+                echo -e "  ${YELLOW}⚠ ntpq 无响应: ${ntpq_out}${NC}"
+            fi
+        elif [ "$ntp_port" = "123" ] && [ "$_has_chronyc" = true ]; then
+            echo -e "  ${CYAN}▶ 使用 chronyc tracking 检测本机同步:${NC}"
+            local chrony_out
+            chrony_out=$(chronyc tracking 2>&1)
+            if [ $? -eq 0 ]; then
+                echo -e "  ${GREEN}✓ chronyc 响应正常${NC}"
+                echo "$chrony_out" | head -6 | while IFS= read -r line; do
+                    echo -e "    ${BLUE}│${NC} $line"
+                done
+                ntp_proto_ok=true
+            else
+                echo -e "  ${YELLOW}⚠ chronyc 无响应: ${chrony_out}${NC}"
+            fi
         else
-            echo -e "  ${YELLOW}⚠ chronyc 无响应: ${chrony_out}${NC}"
+            if [ "$ntp_port" != "123" ]; then
+                echo -e "  ${CYAN}ℹ 自定义端口 ${ntp_port}: 使用纯 Bash UDP 48字节 NTP 请求包探测...${NC}"
+            else
+                echo -e "  ${YELLOW}⚠ 未检测到 ntpdate / ntpq / chronyc${NC}"
+                echo -e "  ${CYAN}▶ 使用纯 Bash UDP 探测（无需额外工具）...${NC}"
+            fi
+            if _bash_ntp_probe "$ntp_target" "$ntp_port"; then
+                echo -e "  ${GREEN}✓ Bash UDP 探测成功：UDP ${ntp_port} 端口收到 NTP 协议有效响应！${NC}"
+                ntp_proto_ok=true
+            else
+                echo -e "  ${RED}✗ Bash UDP 探测超时：端口无响应或服务未就绪${NC}"
+            fi
+        fi
+        echo ""
+
+        # --- 3.4 当前系统时间与时区 ---
+        echo -e "${BLUE}[4/4] 当前系统时间状态...${NC}"
+        echo -e "  ${CYAN}系统时间 : $(date '+%Y-%m-%d %H:%M:%S %Z')${NC}"
+        if command -v timedatectl &>/dev/null; then
+            local sync_status
+            sync_status=$(timedatectl show --property=NTPSynchronized --value 2>/dev/null)
+            if [ "$sync_status" = "yes" ]; then
+                echo -e "  ${GREEN}✓ NTP 同步状态: 已同步${NC}"
+            else
+                echo -e "  ${YELLOW}⚠ NTP 同步状态: 未同步 (timedatectl)${NC}"
+            fi
+            echo -e "  ${CYAN}时区     : $(timedatectl show --property=Timezone --value 2>/dev/null)${NC}"
         fi
 
     else
-        # 无任何 NTP 客户端工具 → 纯 Bash UDP 探测兜底
-        echo -e "  ${YELLOW}⚠ 未检测到 ntpdate / ntpq / chronyc${NC}"
-        echo -e "  ${CYAN}▶ 使用纯 Bash UDP 探测（无需额外工具）...${NC}"
-        if _bash_ntp_probe "$ntp_target"; then
-            echo -e "  ${GREEN}✓ Bash UDP 探测成功：NTP 端口有响应！${NC}"
-            ntp_proto_ok=true
+        # ============================================================
+        # 模式 B：检测远程 NTP 服务器 (例如 192.168.1.100:123)
+        # ============================================================
+
+        # --- 3.1 网络基础连通性探测 (Ping) ---
+        echo -e "${BLUE}[1/4] 检测远程网络连通性 (ICMP Ping)...${NC}"
+        if ping -c 2 -W 2 "$ntp_target" &>/dev/null; then
+            echo -e "  ${GREEN}✓ 主机 ${ntp_target} 网络可达 (Ping 成功)${NC}"
         else
-            echo -e "  ${RED}✗ Bash UDP 探测超时：端口无响应或服务未就绪${NC}"
+            echo -e "  ${YELLOW}⚠ Ping 无响应（可能目标主机禁 Ping，继续检测 UDP 端口）${NC}"
         fi
         echo ""
-        echo -e "  ${BLUE}💡 建议安装 NTP 工具以获得更详细的诊断信息:${NC}"
-        echo -e "  ${CYAN}   菜单选项 [7] → 一键安装 NTP 客户端工具${NC}"
-    fi
-    echo ""
 
-    # --- 3.4 当前系统时间与时区 ---
-    echo -e "${BLUE}[4/4] 当前系统时间状态...${NC}"
-    echo -e "  ${CYAN}系统时间 : $(date '+%Y-%m-%d %H:%M:%S %Z')${NC}"
-    if command -v timedatectl &>/dev/null; then
-        local sync_status
-        sync_status=$(timedatectl show --property=NTPSynchronized --value 2>/dev/null)
-        if [ "$sync_status" = "yes" ]; then
-            echo -e "  ${GREEN}✓ NTP 同步状态: 已同步${NC}"
+        # --- 3.2 远程 UDP 端口连通性探测 ---
+        echo -e "${BLUE}[2/4] 检测远程 UDP ${ntp_port} 端口通信...${NC}"
+        if command -v nc &>/dev/null; then
+            if nc -z -u -w 2 "$ntp_target" "$ntp_port" &>/dev/null; then
+                echo -e "  ${GREEN}✓ nc UDP 套接字通道建立正常${NC}"
+                udp_ok=true
+            else
+                echo -e "  ${YELLOW}⚠ nc UDP 探测无返回（UDP无状态，转入 NTP 协议交互验证）${NC}"
+                udp_ok=true
+            fi
         else
-            echo -e "  ${YELLOW}⚠ NTP 同步状态: 未同步 (timedatectl)${NC}"
+            echo -e "  ${CYAN}ℹ 未安装 nc，直接进入 NTP 协议探测${NC}"
+            udp_ok=true
         fi
-        echo -e "  ${CYAN}时区     : $(timedatectl show --property=Timezone --value 2>/dev/null)${NC}"
+        echo ""
+
+        # --- 3.3 远程 NTP 协议层状态与偏差探测 ---
+        echo -e "${BLUE}[3/4] 探测远程 NTP 协议与时钟质量...${NC}"
+        if [ "$ntp_port" = "123" ] && command -v ntpdate &>/dev/null; then
+            echo -e "  ${CYAN}▶ 使用 ntpdate -q 远程查询 ${ntp_target}:${NC}"
+            local ntpout
+            ntpout=$(ntpdate -q "$ntp_target" 2>&1)
+            if echo "$ntpout" | grep -qE "server .*, stratum|offset"; then
+                echo -e "  ${GREEN}✓ 成功获取远程 NTP 服务器时钟参数！${NC}"
+                echo "$ntpout" | grep -E "server|offset" | while IFS= read -r line; do
+                    echo -e "    ${BLUE}│${NC} $line"
+                done
+                ntp_proto_ok=true
+            else
+                echo -e "  ${RED}✗ ntpdate 查询失败: $(echo "$ntpout" | head -2)${NC}"
+                echo -e "    ${YELLOW}原因可能是: 目标防火墙未放行 UDP 123、容器未启动或尚未收敛 (Stratum 16)${NC}"
+            fi
+        elif [ "$ntp_port" = "123" ] && command -v ntpq &>/dev/null; then
+            echo -e "  ${CYAN}▶ 使用 ntpq -p 远程查询 ${ntp_target}:${NC}"
+            local ntpq_out
+            ntpq_out=$(ntpq -p "$ntp_target" 2>&1)
+            if [ $? -eq 0 ]; then
+                echo -e "  ${GREEN}✓ ntpq 远程查询成功${NC}"
+                echo "$ntpq_out" | head -8 | while IFS= read -r line; do
+                    echo -e "    ${BLUE}│${NC} $line"
+                done
+                ntp_proto_ok=true
+            else
+                echo -e "  ${RED}✗ ntpq 远程查询无响应${NC}"
+            fi
+        else
+            if [ "$ntp_port" != "123" ]; then
+                echo -e "  ${CYAN}ℹ 自定义端口 ${ntp_port}（非 123 端口）：使用原生 48 字节 NTP 请求包探测...${NC}"
+            else
+                echo -e "  ${CYAN}▶ 使用原生 UDP 48 字节 NTP 请求包探测...${NC}"
+            fi
+            if _bash_ntp_probe "$ntp_target" "$ntp_port"; then
+                echo -e "  ${GREEN}✓ 远程 NTP 服务器 [${ntp_target}:${ntp_port}] 响应有效 NTP 报文！${NC}"
+                ntp_proto_ok=true
+            else
+                echo -e "  ${RED}✗ 探测超时：远程目标 [${ntp_target}:${ntp_port}] 无 NTP 响应${NC}"
+            fi
+        fi
+        echo ""
+
+        # --- 3.4 远程目标诊断与时钟同步建议 ---
+        echo -e "${BLUE}[4/4] 客户端同步建议与命令...${NC}"
+        echo -e "  ${CYAN}目标服务器 : ${ntp_target}:${ntp_port}${NC}"
+        if [ "$ntp_proto_ok" = true ]; then
+            echo -e "  ${GREEN}✓ 状态评估 : 该服务器可作为时间同步源${NC}"
+            echo -e "  ${BLUE}  单次同步命令: ${CYAN}ntpdate -u ${ntp_target}${NC}"
+            echo -e "  ${BLUE}  Chrony 配置 : 在 /etc/chrony/chrony.conf 中添加 ${CYAN}server ${ntp_target} iburst${NC}"
+        else
+            echo -e "  ${RED}✗ 状态评估 : 远程服务暂不可达或未就绪${NC}"
+            echo -e "  ${YELLOW}  排查建议: 1. 在远程主机检查 docker ps 确认容器运行${NC}"
+            echo -e "  ${YELLOW}            2. 检查远程防火墙放行: firewall-cmd --add-port=${ntp_port}/udp --permanent${NC}"
+            echo -e "  ${YELLOW}            3. 刚启动容器需等待 30-60 秒完成时钟源握手${NC}"
+            overall_ok=false
+        fi
     fi
     echo ""
 
     # --- 汇总状态 ---
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     if [ "$overall_ok" = true ] && [ "$ntp_proto_ok" = true ]; then
-        echo -e " ${GREEN}🟢 总体状态: NTP 服务器运行正常！${NC}"
-    elif [ "$udp_ok" = true ]; then
-        echo -e " ${YELLOW}🟡 总体状态: 端口已监听，NTP 协议层需进一步确认${NC}"
+        echo -e " ${GREEN}🟢 总体状态: NTP 服务器 [${ntp_target}:${ntp_port}] 响应健康、通信正常！${NC}"
+    elif [ "$udp_ok" = true ] && [ "$ntp_proto_ok" = false ]; then
+        echo -e " ${YELLOW}🟡 总体状态: 网络通道可通，但 NTP 协议层未正常响应（可能正在收敛或被拦截）${NC}"
     else
-        echo -e " ${RED}🔴 总体状态: NTP 服务异常，请检查容器或服务配置${NC}"
+        echo -e " ${RED}🔴 总体状态: NTP 探测失败，目标服务器无法连通${NC}"
     fi
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     read -p "  按回车键返回..." -r < /dev/tty

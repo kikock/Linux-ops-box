@@ -4,13 +4,18 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="2fd15132-d902-4914-bfb1-624deecd9e32" name="更改" comment="更新菜单">
-      <change beforePath="$PROJECT_DIR$/install_docker.sh" beforeDir="false" afterPath="$PROJECT_DIR$/install_docker.sh" afterDir="false" />
-    </list>
+    <list default="true" id="2fd15132-d902-4914-bfb1-624deecd9e32" name="更改" comment="feat(db_mgmt):证书模块" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ChangesViewManager">
+    <option name="groupingKeys">
+      <option value="directory" />
+      <option value="module" />
+      <option value="repository" />
+    </option>
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -83,6 +88,9 @@
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
 }</component>
+  <component name="RebelAgentSelection">
+    <selection>jr</selection>
+  </component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\Users\kikock\Desktop\tkcloud\Linux-ops-box" />
@@ -112,6 +120,14 @@
       <workItem from="1776406702643" duration="4433000" />
       <workItem from="1776908233498" duration="23092000" />
       <workItem from="1778037241554" duration="1882000" />
+      <workItem from="1778204526861" duration="1244000" />
+      <workItem from="1778221906298" duration="10000" />
+      <workItem from="1778832471019" duration="903000" />
+      <workItem from="1781411906467" duration="6000" />
+      <workItem from="1786323176764" duration="16987000" />
+      <workItem from="1787702998919" duration="661000" />
+      <workItem from="1787796729662" duration="581000" />
+      <workItem from="1787799591568" duration="5238000" />
     </task>
     <task id="LOCAL-00001" summary="更新说明">
       <option name="closed" value="true" />
@@ -185,7 +201,31 @@
       <option name="project" value="LOCAL" />
       <updated>1777077493123</updated>
     </task>
-    <option name="localTasksCounter" value="10" />
+    <task id="LOCAL-00010" summary="feat(db_mgmt): 增强工具缺失检查、美化连接配置列表并支持实时状态检测">
+      <option name="closed" value="true" />
+      <created>1778832487105</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1778832487105</updated>
+    </task>
+    <task id="LOCAL-00011" summary="feat(db_mgmt):硬盘优化">
+      <option name="closed" value="true" />
+      <created>1787703055810</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1787703055810</updated>
+    </task>
+    <task id="LOCAL-00012" summary="feat(db_mgmt):证书模块">
+      <option name="closed" value="true" />
+      <created>1787800265971</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1787800265971</updated>
+    </task>
+    <option name="localTasksCounter" value="13" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -212,7 +252,10 @@
     <MESSAGE value="feat: 新增中文乱码一键修复功能到系统环境深度优化菜单 [选项8]" />
     <MESSAGE value="Merge remote-tracking branch 'origin/main'" />
     <MESSAGE value="更新菜单" />
-    <option name="LAST_COMMIT_MESSAGE" value="更新菜单" />
+    <MESSAGE value="feat(db_mgmt): 增强工具缺失检查、美化连接配置列表并支持实时状态检测" />
+    <MESSAGE value="feat(db_mgmt):硬盘优化" />
+    <MESSAGE value="feat(db_mgmt):证书模块" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(db_mgmt):证书模块" />
     <option name="OPTIMIZE_IMPORTS_BEFORE_PROJECT_COMMIT" value="true" />
   </component>
 </project>

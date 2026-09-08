@@ -66,12 +66,22 @@ manage_mirror_sources() {
     _detect_distro() {
         if [ -f /etc/os-release ]; then
             . /etc/os-release
-            if [ -n "$VERSION_CODENAME" ]; then
-                echo "${ID}:${VERSION_CODENAME}"
-            else
-                # 针对 CentOS 等无 codename 的系统，使用主版本号
-                echo "${ID}:${VERSION_ID%%.*}"
-            fi
+            local id_lower
+            id_lower=$(echo "${ID:-unknown}" | tr '[:upper:]' '[:lower:]')
+            local ver="${VERSION_CODENAME:-${UBUNTU_CODENAME:-}}"
+            # 无 codename 时取主版本号
+            [ -z "$ver" ] && ver="${VERSION_ID%%.*}"
+
+            # 国产系统 ID 归一化映射
+            case "$id_lower" in
+                ubuntukylin|neokylin)            id_lower="kylin-deb" ;;
+                kylin)                           id_lower="kylin" ;;
+                uos|uniontechos|deepin*)         id_lower="uos" ;;
+                openeuler|euler|euleros)         id_lower="openeuler" ;;
+                anolis|tencentos|opencloudos)    id_lower="anolis" ;;
+            esac
+
+            echo "${id_lower}:${ver}"
         else
             echo "unknown:"
         fi
@@ -87,39 +97,124 @@ manage_mirror_sources() {
 
         echo -e "${YELLOW}检测到: $distro_id $version_info${NC}"
 
-        if [[ "$distro_id" == "ubuntu" || "$distro_id" == "debian" ]]; then
-            # 备份原配置
+        # ── Debian/Ubuntu 族系 ──────────────────────────────────────────
+        if [[ "$distro_id" == "ubuntu" ]]; then
             local bak="/etc/apt/sources.list.bak.$(date +%F_%H%M%S)"
             cp /etc/apt/sources.list "$bak" 2>/dev/null && echo -e "${BLUE}已备份原配置到: $bak${NC}"
-
-            if [[ "$distro_id" == "ubuntu" ]]; then
-                cat > /etc/apt/sources.list <<EOF
+            cat > /etc/apt/sources.list <<EOF
 # Ubuntu $version_info - $mirror (自动生成 $(date +"%Y-%m-%d %H:%M:%S"))
 deb $mirror $version_info main restricted universe multiverse
 deb $mirror $version_info-updates main restricted universe multiverse
 deb $mirror $version_info-security main restricted universe multiverse
 EOF
-            elif [[ "$distro_id" == "debian" ]]; then
-                local mirror_base="${mirror%/debian}"
-                local security_mirror="${mirror_base}/debian-security"
-                [[ "$mirror" == *"deb.debian.org"* ]] && security_mirror="http://security.debian.org/debian-security"
 
-                cat > /etc/apt/sources.list <<EOF
+        elif [[ "$distro_id" == "debian" ]]; then
+            local bak="/etc/apt/sources.list.bak.$(date +%F_%H%M%S)"
+            cp /etc/apt/sources.list "$bak" 2>/dev/null && echo -e "${BLUE}已备份原配置到: $bak${NC}"
+            local mirror_base="${mirror%/debian}"
+            local security_mirror="${mirror_base}/debian-security"
+            [[ "$mirror" == *"deb.debian.org"* ]] && security_mirror="http://security.debian.org/debian-security"
+            cat > /etc/apt/sources.list <<EOF
 # Debian $version_info - $mirror (自动生成 $(date +"%Y-%m-%d %H:%M:%S"))
 deb $mirror $version_info main contrib non-free
 deb $mirror $version_info-updates main contrib non-free
 deb $security_mirror $version_info-security main contrib non-free
 EOF
+
+        # ── 麒麟系 (APT) ────────────────────────────────────────────────
+        elif [[ "$distro_id" == "kylin-deb" || "$distro_id" == "kylin" ]] && command -v apt &>/dev/null; then
+            local bak="/etc/apt/sources.list.bak.$(date +%F_%H%M%S)"
+            cp /etc/apt/sources.list "$bak" 2>/dev/null && echo -e "${BLUE}已备份原配置到: $bak${NC}"
+            cat > /etc/apt/sources.list <<EOF
+# Kylin $version_info - $mirror (自动生成 $(date +"%Y-%m-%d %H:%M:%S"))
+deb $mirror $version_info main restricted universe multiverse
+deb $mirror $version_info-updates main restricted universe multiverse
+deb $mirror $version_info-security main restricted universe multiverse
+EOF
+
+        # ── 麒麟系 (RPM / DNF) ─────────────────────────────────────────
+        elif [[ "$distro_id" == "kylin" ]] && command -v rpm &>/dev/null; then
+            echo -e "${YELLOW}[INFO] 正在备份 YUM/DNF 配置目录 (/etc/yum.repos.d/)...${NC}"
+            tar -czf "/etc/yum.repos.d.bak.$(date +%F).tar.gz" /etc/yum.repos.d/ &>/dev/null
+            # 替换银河麒麟 V10 Server 官方 repo 中的 baseurl
+            if ls /etc/yum.repos.d/kylin*.repo &>/dev/null; then
+                sed -i "s|baseurl=.*|baseurl=$mirror|g" /etc/yum.repos.d/kylin*.repo
+            else
+                echo -e "${YELLOW}[提示] 未找到 kylin*.repo，请手动配置 /etc/yum.repos.d/ 下的 repo 文件。${NC}"
             fi
+
+        # ── 统信 UOS / Deepin ──────────────────────────────────────────
+        elif [[ "$distro_id" == "uos" ]]; then
+            local bak="/etc/apt/sources.list.bak.$(date +%F_%H%M%S)"
+            cp /etc/apt/sources.list "$bak" 2>/dev/null && echo -e "${BLUE}已备份原配置到: $bak${NC}"
+            cat > /etc/apt/sources.list <<EOF
+# UOS/Deepin $version_info - $mirror (自动生成 $(date +"%Y-%m-%d %H:%M:%S"))
+deb $mirror $version_info main contrib non-free
+deb $mirror $version_info-updates main contrib non-free
+EOF
+
+        # ── openEuler / EulerOS ─────────────────────────────────────────
+        elif [[ "$distro_id" == "openeuler" ]]; then
+            echo -e "${YELLOW}[INFO] 正在备份 openEuler repo 配置...${NC}"
+            tar -czf "/etc/yum.repos.d.bak.$(date +%F).tar.gz" /etc/yum.repos.d/ &>/dev/null
+            local repo_file="/etc/yum.repos.d/openEuler_mirror.repo"
+            cat > "$repo_file" <<EOF
+# openEuler $version_info - $mirror (自动生成 $(date +"%Y-%m-%d %H:%M:%S"))
+[openEuler-OS]
+name=openEuler-\$releasever - OS
+baseurl=$mirror/\$releasever/OS/\$basearch/
+enabled=1
+gpgcheck=0
+
+[openEuler-Everything]
+name=openEuler-\$releasever - Everything
+baseurl=$mirror/\$releasever/everything/\$basearch/
+enabled=1
+gpgcheck=0
+
+[openEuler-Extras]
+name=openEuler-\$releasever - Extras
+baseurl=$mirror/\$releasever/extras/\$basearch/
+enabled=1
+gpgcheck=0
+EOF
+            echo -e "${GREEN}已生成 openEuler 镜像 repo: $repo_file${NC}"
+
+        # ── Anolis OS / TencentOS ───────────────────────────────────────
+        elif [[ "$distro_id" == "anolis" ]]; then
+            echo -e "${YELLOW}[INFO] 正在备份 Anolis repo 配置...${NC}"
+            tar -czf "/etc/yum.repos.d.bak.$(date +%F).tar.gz" /etc/yum.repos.d/ &>/dev/null
+            local repo_file="/etc/yum.repos.d/anolis_mirror.repo"
+            cat > "$repo_file" <<EOF
+# Anolis OS $version_info - $mirror (自动生成 $(date +"%Y-%m-%d %H:%M:%S"))
+[anolis-BaseOS]
+name=Anolis OS \$releasever - BaseOS
+baseurl=$mirror/\$releasever/BaseOS/\$basearch/os/
+enabled=1
+gpgcheck=0
+
+[anolis-AppStream]
+name=Anolis OS \$releasever - AppStream
+baseurl=$mirror/\$releasever/AppStream/\$basearch/os/
+enabled=1
+gpgcheck=0
+
+[anolis-Extras]
+name=Anolis OS \$releasever - Extras
+baseurl=$mirror/\$releasever/Extras/\$basearch/os/
+enabled=1
+gpgcheck=0
+EOF
+            echo -e "${GREEN}已生成 Anolis OS 镜像 repo: $repo_file${NC}"
+
+        # ── CentOS ─────────────────────────────────────────────────────
         elif [[ "$distro_id" == "centos" ]]; then
             echo -e "${YELLOW}[INFO] 正在备份 YUM 配置目录 (/etc/yum.repos.d/)...${NC}"
             tar -czf "/etc/yum.repos.d.bak.$(date +%F).tar.gz" /etc/yum.repos.d/ &>/dev/null
-            
             if [[ "$version_info" == "8" ]]; then
                 echo -e "${YELLOW}[INFO] 正在为 CentOS 8 (EOL) 配置官方归档源 (Vault)...${NC}"
                 sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* 2>/dev/null
                 sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* 2>/dev/null
-                # 如果用户选择了国内镜像地址
                 if [[ "$mirror" != *"vault.centos.org"* ]]; then
                     sed -i "s|vault.centos.org|$mirror|g" /etc/yum.repos.d/CentOS-* 2>/dev/null
                 fi
@@ -182,8 +277,33 @@ EOF
                 echo " 3. 中科大 CentOS $version_info 镜像源 (mirrors.ustc.edu.cn)"
                 echo " 4. 官方 CentOS $version_info 镜像源 (mirror.centos.org)"
             fi
+        elif [[ "$distro_id" == "kylin-deb" || "$distro_id" == "kylin" ]] && command -v apt &>/dev/null; then
+            echo " 1. 麒麟官方镜像源 (archive.kylinos.cn)"
+            echo " 2. 华为云 麒麟镜像源 (mirrors.huaweicloud.com/kylin)"
+            echo " 3. 阿里云 Ubuntu 镜像源 (兼容 APT 底座)"
+            echo " 4. 清华大学 Ubuntu 镜像源 (兼容 APT 底座)"
+        elif [[ "$distro_id" == "kylin" ]] && command -v rpm &>/dev/null; then
+            echo " 1. 麒麟官方 RPM 镜像源 (archive.kylinos.cn/kylin/KYLIN-ALL)"
+            echo " 2. 华为云 麒麟 RPM 镜像源 (mirrors.huaweicloud.com/kylin)"
+            echo " 3. 中科大 麒麟镜像源 (mirrors.ustc.edu.cn)"
+            echo " 4. 清华大学 麒麟镜像源 (mirrors.tuna.tsinghua.edu.cn)"
+        elif [[ "$distro_id" == "uos" ]]; then
+            echo " 1. 统信 UOS 官方源 (pools.uniontech.com/ppa/dde-eagle)"
+            echo " 2. 华为云 UOS/Deepin 镜像源 (mirrors.huaweicloud.com/deepin)"
+            echo " 3. 阿里云 Deepin 镜像源 (mirrors.aliyun.com/deepin)"
+            echo " 4. 清华大学 Deepin 镜像源 (mirrors.tuna.tsinghua.edu.cn/deepin)"
+        elif [[ "$distro_id" == "openeuler" ]]; then
+            echo " 1. 华为云 openEuler 镜像源 (mirrors.huaweicloud.com/openeuler)"
+            echo " 2. 阿里云 openEuler 镜像源 (mirrors.aliyun.com/openeuler)"
+            echo " 3. 清华大学 openEuler 镜像源 (mirrors.tuna.tsinghua.edu.cn/openeuler)"
+            echo " 4. openEuler 官方源 (repo.openeuler.org)"
+        elif [[ "$distro_id" == "anolis" ]]; then
+            echo " 1. 阿里云 Anolis OS 镜像源 (mirrors.aliyun.com/anolis)"
+            echo " 2. 清华大学 Anolis OS 镜像源 (mirrors.tuna.tsinghua.edu.cn/anolis)"
+            echo " 3. 中科大 Anolis OS 镜像源 (mirrors.ustc.edu.cn/anolis)"
+            echo " 4. Anolis 官方源 (mirrors.openanolis.cn/anolis)"
         else
-            echo " 1-4. (抱歉，未能识别系统类型)"
+            echo " 1-4. (抱歉，未能识别系统类型: $distro_id)"
         fi
         echo " 5. 查看当前 sources.list 内容/Repo 列表"
         echo " 6. 还原项目备份的镜像配置"
@@ -200,6 +320,13 @@ EOF
                     if [[ "$version_info" == "8" ]]; then _write_source "http://mirrors.aliyun.com/centos-vault"
                     else _write_source "http://mirrors.aliyun.com/centos"
                     fi
+                elif [[ "$distro_id" == "kylin-deb" || "$distro_id" == "kylin" ]] && command -v apt &>/dev/null; then
+                    _write_source "http://archive.kylinos.cn/kylin/KYLIN-ALL"
+                elif [[ "$distro_id" == "kylin" ]] && command -v rpm &>/dev/null; then
+                    _write_source "http://archive.kylinos.cn/kylin/KYLIN-ALL"
+                elif [[ "$distro_id" == "uos" ]]; then _write_source "http://pools.uniontech.com/ppa/dde-eagle"
+                elif [[ "$distro_id" == "openeuler" ]]; then _write_source "https://mirrors.huaweicloud.com/openeuler"
+                elif [[ "$distro_id" == "anolis" ]]; then _write_source "http://mirrors.aliyun.com/anolis"
                 fi
                 read -p "按回车键继续..."
                 ;;
@@ -210,6 +337,13 @@ EOF
                     if [[ "$version_info" == "8" ]]; then _write_source "http://mirrors.tuna.tsinghua.edu.cn/centos-vault"
                     else _write_source "http://mirrors.tuna.tsinghua.edu.cn/centos"
                     fi
+                elif [[ "$distro_id" == "kylin-deb" || "$distro_id" == "kylin" ]] && command -v apt &>/dev/null; then
+                    _write_source "http://mirrors.huaweicloud.com/kylin"
+                elif [[ "$distro_id" == "kylin" ]] && command -v rpm &>/dev/null; then
+                    _write_source "http://mirrors.huaweicloud.com/kylin"
+                elif [[ "$distro_id" == "uos" ]]; then _write_source "http://mirrors.huaweicloud.com/deepin"
+                elif [[ "$distro_id" == "openeuler" ]]; then _write_source "https://mirrors.aliyun.com/openeuler"
+                elif [[ "$distro_id" == "anolis" ]]; then _write_source "http://mirrors.tuna.tsinghua.edu.cn/anolis"
                 fi
                 read -p "按回车键继续..."
                 ;;
@@ -220,6 +354,13 @@ EOF
                     if [[ "$version_info" == "8" ]]; then _write_source "http://mirrors.ustc.edu.cn/centos-vault"
                     else _write_source "http://mirrors.ustc.edu.cn/centos"
                     fi
+                elif [[ "$distro_id" == "kylin-deb" || "$distro_id" == "kylin" ]] && command -v apt &>/dev/null; then
+                    _write_source "http://mirrors.aliyun.com/ubuntu"
+                elif [[ "$distro_id" == "kylin" ]] && command -v rpm &>/dev/null; then
+                    _write_source "http://mirrors.ustc.edu.cn"
+                elif [[ "$distro_id" == "uos" ]]; then _write_source "http://mirrors.aliyun.com/deepin"
+                elif [[ "$distro_id" == "openeuler" ]]; then _write_source "https://mirrors.tuna.tsinghua.edu.cn/openeuler"
+                elif [[ "$distro_id" == "anolis" ]]; then _write_source "http://mirrors.ustc.edu.cn/anolis"
                 fi
                 read -p "按回车键继续..."
                 ;;
@@ -230,6 +371,13 @@ EOF
                     if [[ "$version_info" == "8" ]]; then _write_source "http://vault.centos.org"
                     else _write_source "http://mirror.centos.org/centos"
                     fi
+                elif [[ "$distro_id" == "kylin-deb" || "$distro_id" == "kylin" ]] && command -v apt &>/dev/null; then
+                    _write_source "http://mirrors.tuna.tsinghua.edu.cn/ubuntu"
+                elif [[ "$distro_id" == "kylin" ]] && command -v rpm &>/dev/null; then
+                    _write_source "http://mirrors.tuna.tsinghua.edu.cn"
+                elif [[ "$distro_id" == "uos" ]]; then _write_source "http://mirrors.tuna.tsinghua.edu.cn/deepin"
+                elif [[ "$distro_id" == "openeuler" ]]; then _write_source "https://repo.openeuler.org"
+                elif [[ "$distro_id" == "anolis" ]]; then _write_source "http://mirrors.openanolis.cn/anolis"
                 fi
                 read -p "按回车键继续..."
                 ;;

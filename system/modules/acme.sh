@@ -114,9 +114,17 @@ _check_acme_deps(){
         dnf install -y "${missing_pkgs[@]}" 2>/dev/null || true
     elif [ -x "$(command -v yum)" ]; then
         yum install -y epel-release 2>/dev/null || true
-        yum install -y "${missing_pkgs[@]}" 2>/dev/null || true
     elif [ -x "$(command -v apk)" ]; then
         apk add "${missing_pkgs[@]}" 2>/dev/null || true
+    fi
+
+    # 检查并确保 cron 服务启动与开机自启
+    if command -v systemctl &>/dev/null; then
+        systemctl enable --now cron 2>/dev/null || systemctl enable --now crond 2>/dev/null || true
+    elif command -v service &>/dev/null; then
+        service cron start 2>/dev/null || service crond start 2>/dev/null || true
+    elif command -v rc-service &>/dev/null; then
+        rc-service crond start 2>/dev/null || true
     fi
 }
 
@@ -220,6 +228,7 @@ fi
 
 if [ -f "$HOME/.acme.sh/acme.sh" ]; then
     green "✓ 安装 acme.sh 证书申请程序成功！"
+    bash "$HOME/.acme.sh/acme.sh" --set-default-ca --server letsencrypt >/dev/null 2>&1 || true
 else
     red "❌ 安装 acme.sh 证书申请程序失败，请检查网络或离线包。" && exit 1
 fi
@@ -254,23 +263,40 @@ if [[ -f "$HOME/agsbx/sb.json" ]]; then
 blue "检测到sing-box内核代理，如果你安装了Argosbx小钢炮脚本，HY2/TUIC/AnyTLS/Naiveproxy四大协议将支持IP域名证书"
 fi
 else
-bash ~/.acme.sh/acme.sh --uninstall >/dev/null 2>&1
-rm -rf /root/kikock
-rm -rf ~/.acme.sh acme.sh
-uncronac
-red "遗憾，IP域名证书申请失败，建议如下："
+red "遗憾，IP/域名证书申请未完成，建议排查如下事项："
 yellow "1、如果你是域名证书申请：如果解析到的IP是104.2开头的或者172开头的IP，请确保CF中的CDN黄云已关闭，解析的IP必须是VPS的本地IP"
 echo
-yellow "2、如果你是域名证书申请：更换下二级域名自定义名称再尝试执行重装脚本（重要）"
+yellow "2、如果你是域名证书申请：更换下二级域名自定义名称再尝试执行重装申请（重要）"
 green "例：原二级域名 x.example.com ，在cloudflare中重命名其中的x名称"
 echo
-yellow "3、如果你是IP证书或者域名证书申请：因为同个本地IP连续多次申请证书有时间限制，等一段时间再重装脚本" && exit
+yellow "3、如果你是独立80端口模式：请确认80端口未被防火墙拦截，且无其他程序占用"
+yellow "4、推荐优先使用 [3. DNS API 模式]，不受80端口与防火墙限制，且可稳定无条件自动续期"
 fi
 }
 
 installCA(){
 mkdir -p /root/kikock
-bash ~/.acme.sh/acme.sh --install-cert -d ${ym} --key-file /root/kikock/private.key --fullchain-file /root/kikock/cert.crt --ecc
+local reload_cmd=""
+local reload_services=()
+for svc in nginx caddy hysteria tuic x-ui sing-box; do
+    if command -v systemctl &>/dev/null && systemctl is-active --quiet "$svc" 2>/dev/null; then
+        reload_services+=("$svc")
+    fi
+done
+if [ ${#reload_services[@]} -gt 0 ]; then
+    reload_cmd="systemctl restart ${reload_services[*]} 2>/dev/null || true"
+fi
+
+if [ -n "$reload_cmd" ]; then
+    bash ~/.acme.sh/acme.sh --install-cert -d "${ym}" \
+        --key-file /root/kikock/private.key \
+        --fullchain-file /root/kikock/cert.crt \
+        --reloadcmd "$reload_cmd" --ecc
+else
+    bash ~/.acme.sh/acme.sh --install-cert -d "${ym}" \
+        --key-file /root/kikock/private.key \
+        --fullchain-file /root/kikock/cert.crt --ecc
+fi
 }
 
 checkip(){
@@ -372,7 +398,8 @@ else
 bash ~/.acme.sh/acme.sh --issue -d "$ym" --standalone -k ec-256 --server letsencrypt --cert-profile shortlived --days 3 --insecure
 fi
 mkdir -p /root/kikock
-bash ~/.acme.sh/acme.sh --install-cert -d "$ip1" --key-file /root/kikock/private.key --fullchain-file /root/kikock/cert.crt --ecc
+ym="$ip1"
+installCA
 checktls
 }
 
@@ -522,6 +549,20 @@ Certificate(){
 [[ -z $(~/.acme.sh/acme.sh -v 2>/dev/null) ]] && yellow "未安装acme.sh证书申请，无法执行" && return
 green "Main_Domain 下显示的域名就是已申请成功的域名证书，Renew 下显示对应域名证书的自动续期时间点"
 bash ~/.acme.sh/acme.sh --list
+echo
+yellow "▌ 当前 Crontab 定时续期任务状态:"
+if crontab -l 2>/dev/null | grep -q -- '--cron'; then
+    green "✓ 定时自动续期任务生效中:"
+    crontab -l 2>/dev/null | grep -- '--cron'
+else
+    red "✗ 未检测到 acme.sh 定时续期任务，建议重新申请或手动执行一次续期修复。"
+fi
+echo
+if [ -f /root/.acme.sh/acme_cron.log ]; then
+    yellow "▌ 最近一次自动续期日志 (/root/.acme.sh/acme_cron.log):"
+    tail -n 10 /root/.acme.sh/acme_cron.log 2>/dev/null || true
+    echo
+fi
 readp "按回车键继续..." tmp_enter
 }
 
@@ -540,27 +581,56 @@ fi
 
 cronac(){
 uncronac
+# 确保 cron/crond 服务处于运行状态
+if command -v systemctl &>/dev/null; then
+    systemctl enable --now cron 2>/dev/null || systemctl enable --now crond 2>/dev/null || true
+elif command -v service &>/dev/null; then
+    service cron start 2>/dev/null || service crond start 2>/dev/null || true
+elif command -v rc-service &>/dev/null; then
+    rc-service crond start 2>/dev/null || true
+fi
+
+local acme_home="$HOME/.acme.sh"
+[ -d "$acme_home" ] || acme_home="/root/.acme.sh"
+local acme_bin="$acme_home/acme.sh"
+
 crontab -l > /tmp/crontab.tmp 2>/dev/null || true
-echo "0 0 * * * bash ~/.acme.sh/acme.sh --cron >/dev/null 2>&1" >> /tmp/crontab.tmp
-crontab /tmp/crontab.tmp
+# 每天 00:00 与 12:00 各执行一次续期检测，显式传递 --home 参数并记录日志
+echo "0 0,12 * * * \"$acme_bin\" --cron --home \"$acme_home\" >/root/.acme.sh/acme_cron.log 2>&1" >> /tmp/crontab.tmp
+crontab /tmp/crontab.tmp 2>/dev/null || true
 rm -f /tmp/crontab.tmp
 }
 
 uncronac(){
 crontab -l > /tmp/crontab.tmp 2>/dev/null || true
-sed -i '/--cron/d' /tmp/crontab.tmp
+sed -i '/--cron/d' /tmp/crontab.tmp 2>/dev/null || true
 crontab /tmp/crontab.tmp 2>/dev/null || true
 rm -f /tmp/crontab.tmp
 }
 
 acmerenew(){
-[[ -z $(~/.acme.sh/acme.sh -v 2>/dev/null) ]] && yellow "未安装acme.sh证书申请，无法执行" && return
+local acme_home="$HOME/.acme.sh"
+[ -d "$acme_home" ] || acme_home="/root/.acme.sh"
+local acme_bin="$acme_home/acme.sh"
+
+if [ ! -f "$acme_bin" ]; then
+    yellow "未安装acme.sh证书申请，无法执行" && return
+fi
+
 green "以下显示的域名就是已申请成功的主证书:"
-bash ~/.acme.sh/acme.sh --list | awk 'NR>1{print $1}' | tail -1
+bash "$acme_bin" --list | awk 'NR>1{print $1}' | tail -1
 echo
+# 如果是80端口模式，尝试释放端口以确保能够成功验证
+acme2
 green "开始续期证书…………" && sleep 2
-bash ~/.acme.sh/acme.sh --cron -f
-checktls
+bash "$acme_bin" --cron -f --home "$acme_home"
+
+if [[ -s /root/kikock/cert.crt && -s /root/kikock/private.key ]]; then
+    cronac
+    green "✓ 证书续期完成！证书（cert.crt）和密钥（private.key）已保存到 /root/kikock 文件夹内。"
+else
+    red "❌ 证书续期失败，请查看上方 acme.sh 的输出报错信息。"
+fi
 readp "按回车键继续..." tmp_enter
 }
 
