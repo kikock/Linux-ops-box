@@ -1117,17 +1117,55 @@ CHRONY_CONF_EOF
 
     local srv_name="chrony"
     if command -v systemctl &>/dev/null; then
-        if systemctl list-unit-files chronyd.service &>/dev/null 2>&1 | grep -q chronyd; then
-            srv_name="chronyd"
+        for candidate in chrony chronyd; do
+            if systemctl cat "$candidate" &>/dev/null 2>&1 || \
+               [ -f "/lib/systemd/system/${candidate}.service" ] || \
+               [ -f "/usr/lib/systemd/system/${candidate}.service" ] || \
+               [ -f "/etc/systemd/system/${candidate}.service" ]; then
+                srv_name="$candidate"
+                break
+            fi
+        done
+
+        # 若系统无现成 unit 文件（如直接下载的离线包或静态编译），自动生成标准服务单元
+        if ! systemctl cat "$srv_name" &>/dev/null 2>&1; then
+            local chronyd_bin
+            chronyd_bin=$(command -v chronyd 2>/dev/null || echo "/usr/sbin/chronyd")
+            cat > /etc/systemd/system/chrony.service << UNIT_EOF
+[Unit]
+Description=chrony, an NTP client/server
+Documentation=man:chronyd(8) man:chrony.conf(5)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+ExecStart=${chronyd_bin}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+            srv_name="chrony"
+            systemctl daemon-reload 2>/dev/null
         fi
+
         systemctl daemon-reload 2>/dev/null
         systemctl unmask "$srv_name" 2>/dev/null
         systemctl enable "$srv_name" 2>/dev/null
+
+        # 杀掉可能存在的冲突或孤儿进程以确保 systemd 干净接管
+        pkill -9 chronyd 2>/dev/null || true
+        rm -f /var/run/chrony/chronyd.pid /var/run/chronyd.pid 2>/dev/null
         systemctl restart "$srv_name" 2>/dev/null
+
         if systemctl is-active "$srv_name" &>/dev/null; then
             echo -e "  ${GREEN}✓ ${srv_name} 服务已启动并设置开机自启${NC}"
+        elif pgrep -x chronyd &>/dev/null; then
+            echo -e "  ${GREEN}✓ chronyd 守护进程运行中${NC}"
         else
-            echo -e "  ${YELLOW}⚠ 服务状态异常，尝试直接启动 chronyd 进程...${NC}"
+            echo -e "  ${YELLOW}⚠ 尝试启动 chronyd 进程...${NC}"
             chronyd 2>/dev/null || true
         fi
     elif command -v service &>/dev/null; then
@@ -1531,14 +1569,21 @@ _check_client_sync_status() {
     local srv_enabled=false
     local mode_desc="未知"
 
-    # 1. 检测 Chrony 守护进程
-    if command -v chronyd &>/dev/null || command -v chronyc &>/dev/null; then
+    # 1. 深度探测 Chrony 服务与进程
+    if command -v chronyd &>/dev/null || command -v chronyc &>/dev/null || pgrep -x chronyd &>/dev/null; then
         mode_desc="Chrony 守护进程模式"
-        if systemctl list-unit-files chrony.service &>/dev/null 2>&1 | grep -q chrony; then
-            srv_name="chrony"
-        elif systemctl list-unit-files chronyd.service &>/dev/null 2>&1 | grep -q chronyd; then
-            srv_name="chronyd"
-        fi
+        for candidate in chrony chronyd; do
+            if systemctl cat "$candidate" &>/dev/null 2>&1 || \
+               [ -f "/lib/systemd/system/${candidate}.service" ] || \
+               [ -f "/usr/lib/systemd/system/${candidate}.service" ] || \
+               [ -f "/etc/systemd/system/${candidate}.service" ] || \
+               [ "$(systemctl is-enabled "$candidate" 2>/dev/null)" = "enabled" ] || \
+               [ "$(systemctl is-active "$candidate" 2>/dev/null)" = "active" ]; then
+                srv_name="$candidate"
+                break
+            fi
+        done
+        [ -z "$srv_name" ] && srv_name="chrony"
     fi
 
     # 2. 检测 Systemd 同步脚本模式
@@ -1556,6 +1601,11 @@ _check_client_sync_status() {
             echo -e "  服务名称: ${CYAN}${srv_name}${NC}"
             echo -e "  运行状态: ${GREEN}✓ 运行中 (active)${NC}"
             echo -e "  同步模式: ${CYAN}${mode_desc}${NC}"
+        elif pgrep -x chronyd &>/dev/null; then
+            srv_active=true
+            echo -e "  服务名称: ${CYAN}${srv_name}${NC}"
+            echo -e "  运行状态: ${GREEN}✓ chronyd 守护进程运行中 (PID: $(pgrep -x chronyd | head -1))${NC}"
+            echo -e "  同步模式: ${CYAN}${mode_desc}${NC}"
         else
             echo -e "  服务名称: ${CYAN}${srv_name}${NC}"
             echo -e "  运行状态: ${RED}✗ 未运行 (${srv_status})${NC}"
@@ -1569,16 +1619,32 @@ _check_client_sync_status() {
     echo ""
 
     echo -e "${GREEN}══════════════ [2/4] 开机自启状态 ══════════════${NC}"
-    if [ -n "$srv_name" ] && command -v systemctl &>/dev/null; then
-        local enable_status
-        enable_status=$(systemctl is-enabled "$srv_name" 2>/dev/null)
-        if [ "$enable_status" = "enabled" ]; then
+    local detected_enabled=false
+    local enabled_srv_name=""
+    if command -v systemctl &>/dev/null; then
+        for s in chrony chronyd "$srv_name"; do
+            [ -z "$s" ] && continue
+            local st
+            st=$(systemctl is-enabled "$s" 2>/dev/null)
+            if [ "$st" = "enabled" ] || [ "$st" = "enabled-runtime" ]; then
+                detected_enabled=true
+                enabled_srv_name="$s"
+                break
+            fi
+        done
+
+        if [ "$detected_enabled" = true ]; then
             srv_enabled=true
-            echo -e "  开机自启: ${GREEN}✓ 已启用 (enabled)${NC} — 系统开机将自动启动并同步"
-        elif [ "$enable_status" = "disabled" ]; then
-            echo -e "  开机自启: ${YELLOW}⚠ 已禁用 (disabled)${NC} — 可通过 systemctl enable ${srv_name} 开启"
+            srv_name="$enabled_srv_name"
+            echo -e "  开机自启: ${GREEN}✓ 已启用 (enabled)${NC} — 服务 [${enabled_srv_name}] 开机将自动启动并同步"
         else
-            echo -e "  开机自启: ${YELLOW}⚠ ${enable_status:-未配置}${NC}"
+            local cur_st
+            cur_st=$(systemctl is-enabled "$srv_name" 2>/dev/null)
+            if [ "$cur_st" = "disabled" ]; then
+                echo -e "  开机自启: ${YELLOW}⚠ 当前未开启 (disabled)${NC}"
+            else
+                echo -e "  开机自启: ${YELLOW}⚠ 尚未配置开机自启服务${NC}"
+            fi
         fi
     elif [ -f /etc/rc.local ] && grep -q "ntp-sync" /etc/rc.local; then
         srv_enabled=true
@@ -1629,6 +1695,55 @@ _check_client_sync_status() {
         echo -e "  主板硬件时钟: ${YELLOW}⚠ 无法直接读取（虚拟化/容器环境属于正常现象）${NC}"
     fi
     echo ""
+
+    # 一键智能开启/修复自启交互
+    if [ "$srv_enabled" = false ] && command -v systemctl &>/dev/null; then
+        echo -e "${YELLOW}┌──────────────────────────────────────────────────────────────┐${NC}"
+        echo -e "${YELLOW}│ 💡 提示: 检测到开机自启尚未激活，工具箱支持一键自动修复配置！ │${NC}"
+        echo -e "${YELLOW}└──────────────────────────────────────────────────────────────┘${NC}"
+        read -p "  是否立即一键启用开机自启服务? [Y/n]: " fix_enable < /dev/tty
+        if [[ ! "$fix_enable" =~ ^[Nn]$ ]]; then
+            echo -ne "  ${CYAN}正在配置并启用开机自启...${NC} "
+            local fix_target="$srv_name"
+            [ -z "$fix_target" ] && fix_target="chrony"
+
+            # 若系统中无任何 unit 文件，生成标准 unit 文件
+            if ! systemctl cat "$fix_target" &>/dev/null 2>&1; then
+                local cbin
+                cbin=$(command -v chronyd 2>/dev/null || echo "/usr/sbin/chronyd")
+                cat > /etc/systemd/system/chrony.service << AUTO_UNIT_EOF
+[Unit]
+Description=chrony, an NTP client/server
+Documentation=man:chronyd(8) man:chrony.conf(5)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+ExecStart=${cbin}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+AUTO_UNIT_EOF
+                fix_target="chrony"
+                systemctl daemon-reload 2>/dev/null
+            fi
+
+            systemctl unmask "$fix_target" 2>/dev/null
+            systemctl enable "$fix_target" 2>/dev/null
+            local check_st
+            check_st=$(systemctl is-enabled "$fix_target" 2>/dev/null)
+            if [ "$check_st" = "enabled" ] || [ "$check_st" = "enabled-runtime" ]; then
+                srv_enabled=true
+                echo -e "${GREEN}✓ 开机自启已成功启用！(服务: ${fix_target})${NC}"
+            else
+                echo -e "${RED}✗ 配置失败，返回状态: ${check_st}${NC}"
+            fi
+        fi
+        echo ""
+    fi
 
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "  ${BLUE}📊 综合校验评估结论:${NC}"
