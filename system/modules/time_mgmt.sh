@@ -396,6 +396,46 @@ _check_hwclock() {
 }
 
 # ================================================================
+# 辅助：一键生成纯内网/离线孤岛模式 ntpd.conf 配置文件
+# ================================================================
+_generate_ntp_offline_conf() {
+    local target_dir="${1:-/etc/ntp-docker}"
+    local target_file="${target_dir}/ntpd.conf"
+
+    echo -ne "  ${CYAN}➜ 正在一键生成离线孤岛配置文件 [${target_file}]...${NC} "
+    mkdir -p "$target_dir" 2>/dev/null
+    cat > "$target_file" << 'NTP_CONF_EOF'
+# ntpd.conf - 纯内网/离线孤岛模式配置文件
+# 由 Linux-ops-box 自动生成
+
+# 127.127.1.0 本地系统时钟驱动 (LOCAL Clock)
+# fudge 声明自身为 Stratum 10（确保断网孤岛时允许对局域网客户端授时）
+server 127.127.1.0
+fudge  127.127.1.0 stratum 10
+
+# 访问控制权限
+restrict default kod nomodify notrap nopeer
+restrict 127.0.0.1
+restrict -6 ::1
+
+# 允许私有局域网所有私网段进行时间查询校准
+restrict 10.0.0.0    mask 255.0.0.0 nomodify notrap
+restrict 172.16.0.0  mask 255.240.0.0 nomodify notrap
+restrict 192.168.0.0 mask 255.255.0.0 nomodify notrap
+
+driftfile /var/lib/ntp/ntp.drift
+NTP_CONF_EOF
+
+    if [ -f "$target_file" ] && [ -s "$target_file" ]; then
+        echo -e "${GREEN}✓ 生成成功！${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ 生成失败（请检查 root 权限）${NC}"
+        return 1
+    fi
+}
+
+# ================================================================
 # 功能 2：Docker NTP 服务器部署
 # ================================================================
 _setup_ntp_docker() {
@@ -473,49 +513,142 @@ _setup_ntp_docker() {
     fi
     echo ""
 
-    # --- 2.4 配置 NTP 上游服务器 ---
-    echo -e "${BLUE}[4/5] 配置 NTP 上游服务器...${NC}"
-    echo -e "  默认上游: ${CYAN}${_NTP_UPSTREAM_DEFAULT}${NC}"
-    read -p "  是否使用默认上游？直接回车=是，或输入自定义（逗号分隔）: " custom_upstream < /dev/tty
-    local ntp_upstream="${_NTP_UPSTREAM_DEFAULT}"
-    if [ -n "$custom_upstream" ]; then
-        ntp_upstream="$custom_upstream"
-        echo -e "  ${GREEN}✓ 使用自定义上游: ${ntp_upstream}${NC}"
+    # --- 2.4 配置 NTP 时间源与运行模式 ---
+    echo -e "${BLUE}[4/5] 配置 NTP 时间源与运行模式...${NC}"
+    echo -e "  ${YELLOW}请选择 NTP 服务器运行模式:${NC}"
+    echo -e "  1. ${GREEN}联网授时模式${NC}（默认）— 从公网阿里云/腾讯云 NTP 源同步并向内网分发"
+    echo -e "  2. ${CYAN}纯内网/离线孤岛模式${NC}   — 【一键自动生成 ntpd.conf】以本机硬件时钟(RTC)为根源授时"
+    echo -e "  3. ${BLUE}自定义上游模式${NC}       — 手动指定上级 NTP 服务器（逗号分隔）"
+    echo ""
+    read -p "  请选择模式 [1-3，直接回车=1]: " ntp_mode_choice < /dev/tty
+    ntp_mode_choice="${ntp_mode_choice:-1}"
+
+    local ntp_upstream=""
+    local offline_mode=false
+    local ntp_conf_dir="/etc/ntp-docker"
+    local ntp_conf_file="${ntp_conf_dir}/ntpd.conf"
+
+    case "$ntp_mode_choice" in
+        2)
+            offline_mode=true
+            echo ""
+            echo -e "  ${CYAN}⏰ [离线孤岛模式] 正在检查本机硬件时钟 (RTC)...${NC}"
+            if hwclock --show &>/dev/null 2>&1; then
+                local hw_now
+                hw_now=$(hwclock --show 2>/dev/null)
+                echo -e "  ${GREEN}✓ 硬件时钟(RTC)可用: ${hw_now}${NC}"
+            else
+                echo -e "  ${YELLOW}⚠ 无法直接读取硬件时钟（虚拟化环境），将以内核系统时钟作为基准${NC}"
+            fi
+            _generate_ntp_offline_conf "$ntp_conf_dir"
+            echo ""
+            ;;
+        3)
+            echo ""
+            read -p "  请输入自定义上游 NTP 服务器（如 192.168.1.1,ntp.aliyun.com）: " custom_upstream < /dev/tty
+            if [ -n "$custom_upstream" ]; then
+                ntp_upstream="$custom_upstream"
+            else
+                ntp_upstream="${_NTP_UPSTREAM_DEFAULT}"
+            fi
+            echo -e "  ${GREEN}✓ 使用上游: ${ntp_upstream}${NC}"
+            echo ""
+            ;;
+        *)
+            ntp_upstream="${_NTP_UPSTREAM_DEFAULT}"
+            echo -e "  ${GREEN}✓ 使用默认国内公网 NTP 源 (${ntp_upstream})${NC}"
+            echo ""
+            ;;
+    esac
+
+    # --- 2.5 检查/拉取镜像并启动容器 ---
+    echo -e "${BLUE}[5/5] 检查 NTP 镜像并启动容器...${NC}"
+
+    local has_local_img=false
+    if docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q 'cturra/ntp'; then
+        has_local_img=true
+    fi
+
+    if [ "$has_local_img" = true ]; then
+        echo -e "  ${GREEN}✓ 本地已存在 cturra/ntp 镜像，直接启动${NC}"
     else
-        echo -e "  ${GREEN}✓ 使用默认国内上游 NTP 源${NC}"
+        if [ "$offline_mode" = true ]; then
+            echo -e "  ${YELLOW}⚠ 本地未发现 cturra/ntp 镜像！${NC}"
+            echo -e "  ${BLUE}  当前为离线孤岛模式，请选择获取镜像方式:${NC}"
+            echo -e "  1. 尝试从网络拉取（如果临时具备外网通道）"
+            echo -e "  2. 导入本地离线镜像包 (.tar 文件)"
+            echo -e "  0. 取消退出"
+            read -p "  请选择 [1-2, 0取消]: " img_choice < /dev/tty
+            case "$img_choice" in
+                2)
+                    read -p "  请输入离线镜像 tar 文件路径 (如 /root/ntp-server-image.tar): " tar_path < /dev/tty
+                    if [ -f "$tar_path" ]; then
+                        echo -e "  ${CYAN}⏳ 正在导入镜像: ${tar_path}...${NC}"
+                        docker load -i "$tar_path"
+                    else
+                        echo -e "  ${RED}✗ 文件不存在: ${tar_path}${NC}"
+                        read -p "  按回车键返回..." -r < /dev/tty
+                        return 1
+                    fi
+                    ;;
+                1)
+                    echo -e "  ${YELLOW}⏳ 正在尝试拉取镜像 cturra/ntp:latest...${NC}"
+                    if ! docker pull cturra/ntp:latest 2>&1; then
+                        echo -e "  ${RED}✗ 镜像拉取失败！${NC}"
+                        read -p "  按回车键返回..." -r < /dev/tty
+                        return 1
+                    fi
+                    ;;
+                *)
+                    echo -e "  ${BLUE}已取消。${NC}"
+                    read -p "  按回车键返回..." -r < /dev/tty
+                    return 0
+                    ;;
+            esac
+        else
+            echo -e "  ${YELLOW}⏳ 正在拉取镜像 cturra/ntp:latest（可能需要几分钟）...${NC}"
+            if ! docker pull cturra/ntp:latest 2>&1; then
+                echo -e "  ${RED}✗ 镜像拉取失败！请检查网络或 Docker 镜像加速配置。${NC}"
+                echo -e "  ${BLUE}  提示: 可在 [9. Docker 管理中心] 配置镜像加速源后重试。${NC}"
+                echo -e "  ${BLUE}  或手动导入本地 tar: docker load -i ntp.tar${NC}"
+                read -p "  按回车键返回..." -r < /dev/tty
+                return 1
+            fi
+        fi
     fi
+
+    echo -e "  ${GREEN}✓ 镜像就绪，正在启动 NTP 容器...${NC}"
     echo ""
 
-    # --- 2.5 拉取镜像并启动容器 ---
-    echo -e "${BLUE}[5/5] 拉取 NTP 镜像并启动容器...${NC}"
-    echo -e "  ${YELLOW}⏳ 正在拉取镜像 cturra/ntp:latest（可能需要几分钟）...${NC}"
-
-    # 尝试拉取（带超时）
-    if ! docker pull cturra/ntp:latest 2>&1; then
-        echo -e "  ${RED}✗ 镜像拉取失败！请检查网络或 Docker 镜像加速配置。${NC}"
-        echo -e "  ${BLUE}  提示: 可在 [9. Docker 管理中心] 配置镜像加速源后重试。${NC}"
-        echo -e "  ${BLUE}  或手动导入本地 tar: docker load -i ntp.tar${NC}"
-        read -p "  按回车键返回..." -r < /dev/tty
-        return 1
+    if [ "$offline_mode" = true ]; then
+        docker run -d \
+            --name "$_NTP_CONTAINER_NAME" \
+            --restart=always \
+            --cap-add SYS_TIME \
+            -p 123:123/udp \
+            -v "${ntp_conf_file}:/etc/ntpd.conf:ro" \
+            cturra/ntp:latest
+    else
+        docker run -d \
+            --name "$_NTP_CONTAINER_NAME" \
+            --restart=always \
+            --cap-add SYS_TIME \
+            -p 123:123/udp \
+            -e NTP_SERVERS="${ntp_upstream}" \
+            cturra/ntp:latest
     fi
-
-    echo -e "  ${GREEN}✓ 镜像拉取成功，正在启动 NTP 容器...${NC}"
-    echo ""
-
-    docker run -d \
-        --name "$_NTP_CONTAINER_NAME" \
-        --restart=always \
-        --cap-add SYS_TIME \
-        -p 123:123/udp \
-        -e NTP_SERVERS="${ntp_upstream}" \
-        cturra/ntp:latest
 
     if [ $? -eq 0 ]; then
         echo ""
         echo -e "  ${GREEN}🎉 NTP 服务器容器已成功启动！${NC}"
         echo -e "  ${CYAN}  容器名称: ${_NTP_CONTAINER_NAME}${NC}"
         echo -e "  ${CYAN}  监听端口: UDP 123${NC}"
-        echo -e "  ${CYAN}  上游服务: ${ntp_upstream}${NC}"
+        if [ "$offline_mode" = true ]; then
+            echo -e "  ${CYAN}  运行模式: 纯内网/离线孤岛模式 (自动挂载 ${ntp_conf_file})${NC}"
+            echo -e "  ${CYAN}  授时基准: 本机硬件时钟 (RTC/Local Clock 127.127.1.0 stratum 10)${NC}"
+        else
+            echo -e "  ${CYAN}  上游服务: ${ntp_upstream}${NC}"
+        fi
         echo -e "  ${CYAN}  重启策略: always（开机自启）${NC}"
         echo ""
         echo -e "  ${YELLOW}⏳ 等待 NTP 服务初始化（约 30 秒后可进行健康检测）...${NC}"

@@ -188,6 +188,23 @@ sudo hwclock --show
 ---
 
 #### 步骤 5：生成孤岛模式 ntpd.conf 配置文件
+
+> 🚀 **工具箱一键全自动处理（强烈推荐）**：
+> 本项目已将硬件时钟检测、自动生成 `/etc/ntp-docker/ntpd.conf` 以及挂载启动容器全流程封装为**全自动一键处理**：
+> 1. 运行系统时间管理中心：
+>    ```bash
+>    bash system/system_init.sh
+>    ```
+> 2. 进入 `[14] 系统时间管理中心` → 选择 `[2] 部署 Docker NTP 服务器`；
+> 3. 在运行模式中选择 **`[2] 纯内网/离线孤岛模式`**：
+>    脚本会自动检测并校准硬件时钟、全自动创建 `/etc/ntp-docker/ntpd.conf` 并带 `-v` 挂载参数一键启动容器！
+> 
+> 💡 若仅需在终端单独一键生成配置文件，可直接执行脚本内置函数：
+> ```bash
+> sudo bash -c 'source system/modules/time_mgmt.sh && _generate_ntp_offline_conf'
+> ```
+
+##### 手动创建方式（无工具箱时的传统命令备用）：
 在 A 主机创建离线配置目录与配置文件：
 ```bash
 sudo mkdir -p /etc/ntp-docker
