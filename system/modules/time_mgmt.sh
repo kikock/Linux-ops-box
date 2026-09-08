@@ -472,7 +472,7 @@ _setup_ntp_docker() {
     if [ -n "$container_status" ]; then
         if [ "$container_status" = "running" ]; then
             echo -e "  ${GREEN}✓ NTP 容器 [${_NTP_CONTAINER_NAME}] 已在运行中！${NC}"
-            echo -e "  ${BLUE}  使用菜单 [3] 查看健康状态，或 [5] 先停止再重新配置。${NC}"
+            echo -e "  ${BLUE}  使用菜单 [4] 查看健康状态，或 [7] 先停止再重新配置。${NC}"
             read -p "  按回车键返回..." -r < /dev/tty
             return 0
         else
@@ -678,7 +678,7 @@ _setup_ntp_docker() {
         else
             echo -e "    Chrony 配置语法: ${CYAN}server <A端主机IP> port ${ntp_host_port} iburst${NC}"
         fi
-        echo -e "    可在 B 机器直接运行本脚本，选择菜单 [4] 即可自动完成客户端安装、配置与即时同步！"
+        echo -e "    可在 B 机器直接运行本脚本，选择菜单 [2] 即可自动完成客户端安装、配置与即时同步！"
         echo ""
         echo -e "  ${YELLOW}⏳ 等待 NTP 服务初始化（约 30 秒后可进行健康检测）...${NC}"
     else
