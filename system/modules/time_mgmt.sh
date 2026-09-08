@@ -147,33 +147,65 @@ _install_ntp_tools() {
     fi
 
     # ================================================================
+    # ================================================================
+    # 本地离线安装包探测 (system/packages)
+    # ================================================================
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local base_pkg_dir="${script_dir}/../packages"
+    [ ! -d "$base_pkg_dir" ] && base_pkg_dir="${script_dir}/packages"
+
+    local offline_chrony=""
+    local offline_ntpdate=""
+    local has_offline=false
+
+    if [ "$pkg_mgr_type" = "debian" ]; then
+        offline_chrony=$(find "${base_pkg_dir}/deb" -name "chrony*.deb" 2>/dev/null | head -1)
+        offline_ntpdate=$(find "${base_pkg_dir}/deb" -name "ntpdate*.deb" 2>/dev/null | head -1)
+        [ -n "$offline_chrony" ] || [ -n "$offline_ntpdate" ] && has_offline=true
+    elif [ "$pkg_mgr_type" = "rhel" ]; then
+        offline_chrony=$(find "${base_pkg_dir}/rpm" -name "chrony*.rpm" 2>/dev/null | head -1)
+        offline_ntpdate=$(find "${base_pkg_dir}/rpm" -name "ntpdate*.rpm" 2>/dev/null | head -1)
+        [ -n "$offline_chrony" ] || [ -n "$offline_ntpdate" ] && has_offline=true
+    fi
+
+    if [ "$has_offline" = true ]; then
+        echo -e "${GREEN}📦 检测到仓库内置离线包 (system/packages):${NC}"
+        [ -n "$offline_chrony" ] && echo -e "  - chrony 离线包 : ${CYAN}$(basename "$offline_chrony")${NC}"
+        [ -n "$offline_ntpdate" ] && echo -e "  - ntpdate 离线包: ${CYAN}$(basename "$offline_ntpdate")${NC}"
+        echo ""
+    fi
+
+    # ================================================================
     # 显示安装方案（根据系统底座动态调整选项）
     # ================================================================
     echo -e "${YELLOW}请选择安装方案:${NC}"
 
     if [ "$kylin_is_rpm" = true ]; then
         # 麒麟 V10 Server RPM 底座 — chrony 优先，ntpdate 可能缺包
-        echo -e " 1. ${GREEN}安装 chrony（含 chronyc，麒麟 RPM 首选 ★）${NC}"
-        echo -e " 2. 尝试安装 ntpdate（可能不在默认仓库，失败属正常）"
+        echo -e " 1. ${GREEN}安装 chrony（含 chronyc，麒麟 RPM 在线首选 ★）${NC}"
+        echo -e " 2. 尝试在线安装 ntpdate（可能不在默认仓库）"
         echo -e " 3. 安装 ntp（含 ntpq，注意会与 chrony 服务冲突）"
-        echo -e " 4. ${GREEN}chrony + 尝试 ntpdate（推荐完整组合）${NC}"
+        echo -e " 4. ${GREEN}chrony + 尝试 ntpdate（在线完整组合）${NC}"
     else
         # Debian / Ubuntu / 麒麟 APT / Alpine — 三套工具均可安装
-        echo -e " 1. 安装 ntpdate（单次同步工具，体积小，${GREEN}推荐${NC}）"
-        echo -e " 2. 安装 ntp（含 ntpdate + ntpq，守护进程式服务）"
-        echo -e " 3. ${GREEN}安装 chrony（含 chronyc，现代轻量 NTP 守护进程）${NC}"
-        echo -e " 4. ${GREEN}全部安装（ntpdate + chrony，最完整）${NC}"
+        echo -e " 1. 在线安装 ntpdate（单次同步工具，体积小，${GREEN}推荐${NC}）"
+        echo -e " 2. 在线安装 ntp（含 ntpdate + ntpq，守护进程式服务）"
+        echo -e " 3. ${GREEN}在线安装 chrony（含 chronyc，现代轻量 NTP 守护进程）${NC}"
+        echo -e " 4. ${GREEN}全部在线安装（ntpdate + chrony，最完整）${NC}"
+    fi
+    if [ "$has_offline" = true ]; then
+        echo -e " 5. ${CYAN}📦 纯内网/离线安装（使用本地 system/packages 离线包，无外网推荐 ★）${NC}"
     fi
     echo -e " 0. 取消返回"
     echo ""
-    read -p "  请选择 [0-4]: " install_choice < /dev/tty
+    read -p "  请选择 [0-5]: " install_choice < /dev/tty
 
     [ "$install_choice" = "0" ] && return
 
     echo ""
 
     # ================================================================
-    # 执行安装 — 麒麟 RPM 底座独立逻辑 / 其余通用逻辑
+    # 执行安装 — 麒麟 RPM 底座独立逻辑 / 其余通用逻辑 / 离线安装
     # ================================================================
     case "$install_choice" in
         1)
@@ -232,6 +264,34 @@ _install_ntp_tools() {
                 echo -e "  ${CYAN}步骤 2/2: 安装 chrony${NC}"
                 systemctl stop ntp ntpd 2>/dev/null || true
                 $pkg_install_cmd chrony 2>/dev/null || true
+            fi
+            ;;
+        5)
+            echo -e "${YELLOW}⏳ 正在使用本地 system/packages 离线包执行纯离线安装...${NC}"
+            systemctl stop ntp ntpd 2>/dev/null || true
+            if [ "$pkg_mgr_type" = "debian" ]; then
+                local debs=()
+                [ -n "$offline_chrony" ] && debs+=("$offline_chrony")
+                [ -n "$offline_ntpdate" ] && debs+=("$offline_ntpdate")
+                if [ ${#debs[@]} -gt 0 ]; then
+                    dpkg -i "${debs[@]}" 2>/dev/null || apt-get install -f -y 2>/dev/null || true
+                    systemctl enable --now chrony 2>/dev/null || true
+                    echo -e "  ${GREEN}✓ Debian/Ubuntu 离线包安装执行完毕${NC}"
+                else
+                    echo -e "  ${RED}✗ 未找到 Debian 体系的离线安装包${NC}"
+                fi
+            elif [ "$pkg_mgr_type" = "rhel" ]; then
+                local rpms=()
+                [ -n "$offline_chrony" ] && rpms+=("$offline_chrony")
+                [ -n "$offline_ntpdate" ] && rpms+=("$offline_ntpdate")
+                if [ ${#rpms[@]} -gt 0 ]; then
+                    rpm -Uvh --replacepkgs --nodeps "${rpms[@]}" 2>/dev/null || \
+                        yum localinstall -y "${rpms[@]}" 2>/dev/null || true
+                    systemctl enable --now chronyd 2>/dev/null || true
+                    echo -e "  ${GREEN}✓ RHEL/CentOS/麒麟 离线包安装执行完毕${NC}"
+                else
+                    echo -e "  ${RED}✗ 未找到 RPM 体系的离线安装包${NC}"
+                fi
             fi
             ;;
         *)

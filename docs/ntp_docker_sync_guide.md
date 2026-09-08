@@ -110,28 +110,92 @@ cd /data/ntp && docker compose up -d
 ---
 
 ### 2.3 场景二：纯内网/离线孤岛部署（本机硬件时钟授时）
-> **适用场景**：A 主机处于完全隔离的涉密内网或无外网环境。A 主机以**自身硬件时钟（RTC/Local Clock）**作为基准源（Stratum 10），为局域网内的 B 主机等所有设备提供时间统一基准。
+> **适用场景**：A 主机与 B 主机均处于完全物理隔离的涉密内网或无外网生产环境。
+> **授时基准**：A 主机以**自身主板硬件时钟（RTC/Local Clock）**作为根时间源（Stratum 10），为局域网内的 B 主机等所有业务节点提供统一时间基准。
 
-#### 步骤 1：先校准 A 主机的硬件时钟
-在部署前，务必先手动校准好 A 主机的当前系统时间，并写入主板硬件时钟：
+---
+
+#### 步骤 1：仓库预置离线安装包与系统版本匹配
+为解决纯内网无源可用问题，本项目已在仓库目录 `system/packages/` 内预置并提交了常用 Linux 发行版的 NTP 离线安装包：
+
+| 发行版底座 | 适用操作系统 | 包含组件 | 预置离线包路径 |
+| :--- | :--- | :--- | :--- |
+| **DEB 体系** (APT) | Ubuntu 20.04/22.04/24.04、Debian 10/11/12、统信 UOS、麒麟桌面版 | `chrony`、`ntpdate` | `system/packages/deb/chrony_4.5-1ubuntu4_amd64.deb`<br>`system/packages/deb/ntpdate_4.2.8p15+dfsg-1ubuntu2_amd64.deb` |
+| **RPM 体系** (YUM/DNF) | CentOS 7/8、RHEL 7/8/9、Rocky、AlmaLinux、银河麒麟 V10 Server、openEuler | `chrony`、`ntpdate` | `system/packages/rpm/chrony-3.4-1.el7.x86_64.rpm`<br>`system/packages/rpm/ntpdate-4.2.6p5-29.el7.centos.2.x86_64.rpm` |
+
+> 💡 **在线增补离线包**：若需在联网跳板机上为特定异构系统重新抓取离线包，只需在联网机执行：
+> ```bash
+> bash system/download_offline_packages.sh
+> # 或执行 Python 离线包采集引擎：
+> python3 system/fetch_packages.py
+> ```
+> 脚本会自动检测当前系统版本，将完整依赖包下载整理至 `system/packages/` 目录下，直接打包拷入内网即可。
+
+---
+
+#### 步骤 2：A/B 主机纯内网一键离线安装客户端工具
+在完全断网的主机上，可任选以下方式安装 `chrony` 或 `ntpdate`：
+
+##### 方式 A：通过工具箱 TUI 菜单纯离线一键安装（推荐）
 ```bash
-# 格式：YYYY-MM-DD hh:mm:ss
-sudo date -s "2026-09-08 23:00:00"
+bash system/system_init.sh
+# 依次进入：[14] 系统时间管理中心 → [7] 安装 NTP 客户端工具
+# 脚本自动检测到本地 system/packages 离线包，选择：
+# [5] 纯内网/离线安装（使用本地 system/packages 离线包）
+```
 
-# 将系统时间写入硬件时钟 (RTC)
+##### 方式 B：终端单行命令直接安装
+- **Debian / Ubuntu / 统信 UOS / 麒麟桌面版**：
+  ```bash
+  sudo dpkg -i system/packages/deb/chrony*.deb system/packages/deb/ntpdate*.deb 2>/dev/null || true
+  sudo systemctl enable --now chrony
+  ```
+- **CentOS / RHEL / 银河麒麟 V10 / openEuler**：
+  ```bash
+  sudo rpm -Uvh --replacepkgs --nodeps system/packages/rpm/chrony*.rpm system/packages/rpm/ntpdate*.rpm 2>/dev/null || true
+  sudo systemctl enable --now chronyd
+  ```
+
+---
+
+#### 步骤 3：A 主机离线准备 Docker NTP 镜像
+由于纯内网无法执行 `docker pull`，请在有外网机器上导出镜像并导入 A 主机：
+```bash
+# ① 在有网电脑拉取并导出 Docker NTP 镜像
+docker pull cturra/ntp:latest
+docker save -o ntp-server-image.tar cturra/ntp:latest
+
+# ② 将 ntp-server-image.tar 复制到纯内网 A 主机并导入
+docker load -i ntp-server-image.tar
+docker images | grep ntp
+```
+
+---
+
+#### 步骤 4：校准 A 主机系统时间并写入主板硬件时钟
+在断网环境下，必须先确保 A 主机本机的系统时间准确，并固化至 CMOS 主板硬件时钟（RTC）：
+```bash
+# 手动设定当前准确时间（格式：YYYY-MM-DD hh:mm:ss）
+sudo date -s "2026-09-08 23:30:00"
+
+# 将系统时间写入主板硬件时钟 (RTC)
 sudo hwclock --systohc
 
 # 查看硬件时钟确认
 sudo hwclock --show
 ```
 
-#### 步骤 2：生成自定义 ntpd.conf 配置文件
+---
+
+#### 步骤 5：生成孤岛模式 ntpd.conf 配置文件
+在 A 主机创建离线配置目录与配置文件：
 ```bash
 sudo mkdir -p /etc/ntp-docker
 
 sudo cat > /etc/ntp-docker/ntpd.conf << 'EOF'
-# ntpd.conf - 纯内网/离线模式配置文件
-# 使用本地时钟驱动 (LOCAL Clock 127.127.1.0)
+# ntpd.conf - 纯内网/离线孤岛模式配置文件
+# 使用 127.127.1.0 本地系统时钟驱动 (LOCAL Clock)
+# fudge 声明自身为 Stratum 10（即使无上游外网源也允许向内网客户端授时）
 server 127.127.1.0
 fudge  127.127.1.0 stratum 10
 
@@ -140,7 +204,7 @@ restrict default kod nomodify notrap nopeer
 restrict 127.0.0.1
 restrict -6 ::1
 
-# 允许私有局域网网段设备进行时间查询
+# 允许私有局域网网段进行 NTP 时间校准
 restrict 10.0.0.0    mask 255.0.0.0 nomodify notrap
 restrict 172.16.0.0  mask 255.240.0.0 nomodify notrap
 restrict 192.168.0.0 mask 255.255.0.0 nomodify notrap
@@ -149,7 +213,9 @@ driftfile /var/lib/ntp/ntp.drift
 EOF
 ```
 
-#### 步骤 3：启动离线模式容器
+---
+
+#### 步骤 6：启动离线孤岛 NTP 容器
 ```bash
 docker run -d \
   --name ntp-server \
@@ -159,6 +225,17 @@ docker run -d \
   -v /etc/ntp-docker/ntpd.conf:/etc/ntpd.conf:ro \
   cturra/ntp:latest
 ```
+
+> 🌟 **无 Docker 环境的原生 Chrony 离线服务端备选方案**：
+> 若 A 主机未安装 Docker，也可直接使用上述步骤 2 安装的 `chrony` 作为服务端。只需编辑 `/etc/chrony/chrony.conf`（或 `/etc/chrony.conf`）：
+> ```ini
+> # 允许局域网客户端网段访问
+> allow 192.168.0.0/16
+> allow 10.0.0.0/8
+> # 在无外网源时，以本地时钟作为层级 10 的时间基准
+> local stratum 10
+> ```
+> 执行 `sudo systemctl restart chronyd || sudo systemctl restart chrony` 即可同样充当内网 NTP 服务器。
 
 ---
 

@@ -44,7 +44,7 @@ if command -v apt-get &>/dev/null; then
     apt-get update -y 2>/dev/null || true
     cd "$local_sub"
     
-    DEB_LIST=(curl openssl lsof socat tar wget cron dnsutils nano vim htop net-tools unzip zip)
+    DEB_LIST=(curl openssl lsof socat tar wget cron dnsutils nano vim htop net-tools unzip zip chrony ntpdate)
     echo -e "下载目标: ${YELLOW}${DEB_LIST[*]}${NC}"
     
     for pkg in "${DEB_LIST[@]}"; do
@@ -69,7 +69,7 @@ elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
     esac
     echo -e "⏳ 正在下载 .rpm 离线包到: ${CYAN}${local_sub}${NC} ..."
     
-    RPM_LIST=(curl openssl lsof socat tar wget cronie bind-utils nano vim-enhanced htop net-tools unzip zip)
+    RPM_LIST=(curl openssl lsof socat tar wget cronie bind-utils nano vim-enhanced htop net-tools unzip zip chrony ntpdate)
     echo -e "下载目标: ${YELLOW}${RPM_LIST[*]}${NC}"
     
     if command -v dnf &>/dev/null; then

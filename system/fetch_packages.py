@@ -25,6 +25,8 @@ DEB_MAPPINGS = [
     ("wget", "http://mirrors.aliyun.com/ubuntu/pool/main/w/wget/", r"wget_[0-9][^\"<>]*(?:amd64)\.deb"),
     ("tar", "http://mirrors.aliyun.com/ubuntu/pool/main/t/tar/", r"tar_[0-9][^\"<>]*(?:amd64)\.deb"),
     ("openssl", "http://mirrors.aliyun.com/ubuntu/pool/main/o/openssl/", r"openssl_[0-9][^\"<>]*(?:amd64)\.deb"),
+    ("chrony", "http://mirrors.aliyun.com/ubuntu/pool/main/c/chrony/", r"chrony_[0-9][^\"<>]*(?:amd64)\.deb"),
+    ("ntpdate", "http://mirrors.aliyun.com/ubuntu/pool/universe/n/ntp/", r"ntpdate_[0-9][^\"<>]*(?:amd64)\.deb"),
 ]
 
 # 2. CentOS / RHEL (RPM .rpm) 软件源池配置
@@ -41,6 +43,8 @@ RPM_MAPPINGS = [
     ("unzip", "http://mirrors.aliyun.com/centos/7/os/x86_64/Packages/", r"unzip-[0-9][^\"<>]*(?:x86_64)\.rpm"),
     ("zip", "http://mirrors.aliyun.com/centos/7/os/x86_64/Packages/", r"zip-[0-9][^\"<>]*(?:x86_64)\.rpm"),
     ("socat", "http://mirrors.aliyun.com/centos/7/os/x86_64/Packages/", r"socat-[0-9][^\"<>]*(?:x86_64)\.rpm"),
+    ("chrony", "http://mirrors.aliyun.com/centos/7/os/x86_64/Packages/", r"chrony-[0-9][^\"<>]*(?:x86_64)\.rpm"),
+    ("ntpdate", "http://mirrors.aliyun.com/centos/7/os/x86_64/Packages/", r"ntpdate-[0-9][^\"<>]*(?:x86_64)\.rpm"),
 ]
 
 def download_pool(mappings, target_dir, label):

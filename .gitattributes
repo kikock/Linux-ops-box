@@ -10,6 +10,8 @@
 *.xml text eol=lf
 
 # 二进制文件保留原始格式
+*.deb binary
+*.rpm binary
 *.tar binary
 *.tar.gz binary
 *.png binary
