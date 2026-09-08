@@ -4,7 +4,10 @@
 # 脚本名称: system_init.sh
 # 描述: Linux 系统初始化工具箱 (多发行版适配)
 # 适配: Ubuntu / Debian / Armbian / Raspberry Pi OS /
-#       CentOS / RHEL / Fedora / Alpine Linux
+#       CentOS / RHEL / Rocky / AlmaLinux / Fedora / Alpine Linux /
+#       银河麒麟 V10 (kylin) / 中标麒麟 (neokylin) / Ubuntu Kylin /
+#       统信 UOS (uos) / Deepin / openEuler / EulerOS /
+#       龙蜥 Anolis OS / TencentOS / 普华 Linux
 # 制作人: kikock
 # =================================================================
 
@@ -59,6 +62,9 @@ if [ -f "$BASE_DIR/modules/ssl_cert.sh" ]; then
 fi
 if [ -f "$BASE_DIR/modules/acme.sh" ]; then
     source "$BASE_DIR/modules/acme.sh"
+fi
+if [ -f "$BASE_DIR/modules/time_mgmt.sh" ]; then
+    source "$BASE_DIR/modules/time_mgmt.sh"
 fi
 
 # ================================================================
@@ -376,6 +382,8 @@ while true; do
     echo " 12. SSL/TLS 证书管理中心 (ACME联网申请 / 离线自签证书 / 自建CA)"
     echo -e "${GREEN}══════════════ 💾  磁盘管理中心 ══════════════${NC}"
     echo " 13. 硬盘检测与清理中心   (使用率/大文件/大目录/清理)"
+    echo -e "${GREEN}══════════════ ⏰  时间管理中心 ══════════════${NC}"
+    echo " 14. 系统时间管理中心     (RTC硬件时钟/NTP服务器/开机同步)"
     echo -e "${GREEN}══════════════ ⚙   工具箱管理   ══════════════${NC}"
     echo -e "${YELLOW} 88. ♻  在线更新工具箱${NC}"
     echo -e "${RED} 99. 🗑  卸载此工具箱${NC}"
@@ -408,6 +416,7 @@ while true; do
             ;;
         12) ssl_cert_menu ;;
         13) disk_management_center ;;
+        14) time_management_menu ;;
         88) _update_toolbox ;;
         99)
             echo -e "${YELLOW}警告: 即将执行彻底卸载程序...${NC}"
