@@ -484,32 +484,48 @@ _setup_ntp_docker() {
     fi
     echo ""
 
-    # --- 2.3 检查 UDP 123 端口占用 ---
-    echo -e "${BLUE}[3/5] 检测 UDP 123 端口占用...${NC}"
+    # --- 2.3 宿主机端口配置与占用检测 ---
+    echo -e "${BLUE}[3/5] 配置宿主机 UDP 监听端口与占用检测...${NC}"
+    echo -e "  NTP 协议标准端口为 ${CYAN}123${NC}（默认推荐）。"
+    echo -e "  若宿主机 123 端口已被其他服务占用或需端口隔离，可输入自定义端口（如 1123）。"
+    read -p "  请输入宿主机 UDP 监听端口 [直接回车=123]: " custom_port < /dev/tty
+    local ntp_host_port="${custom_port:-123}"
+    if ! [[ "$ntp_host_port" =~ ^[0-9]+$ ]] || [ "$ntp_host_port" -lt 1 ] || [ "$ntp_host_port" -gt 65535 ]; then
+        echo -e "  ${YELLOW}⚠ 端口输入无效，已重置为默认端口 123${NC}"
+        ntp_host_port=123
+    fi
+    echo -e "  ${GREEN}✓ 宿主机监听端口: UDP ${ntp_host_port}${NC}"
+
     local port_used=false
     if command -v ss &>/dev/null; then
-        ss -ulnp 2>/dev/null | grep -q ':123 ' && port_used=true
+        ss -ulnp 2>/dev/null | grep -q ":${ntp_host_port} " && port_used=true
     elif command -v netstat &>/dev/null; then
-        netstat -ulnp 2>/dev/null | grep -q ':123 ' && port_used=true
+        netstat -ulnp 2>/dev/null | grep -q ":${ntp_host_port} " && port_used=true
     fi
 
     if [ "$port_used" = true ]; then
-        echo -e "  ${YELLOW}⚠ UDP 123 端口已被占用（系统可能已运行 ntpd/chrony）${NC}"
-        echo -e "  ${BLUE}  请先停止系统 NTP 服务:${NC}"
-        echo -e "  ${CYAN}  systemctl stop ntp ntpd chrony chronyd 2>/dev/null${NC}"
-        echo ""
-        read -p "  是否尝试自动停止系统 NTP 服务并继续? [y/N]: " stop_sys_ntp < /dev/tty
-        if [[ "$stop_sys_ntp" =~ ^[Yy]$ ]]; then
-            systemctl stop ntp ntpd chrony chronyd 2>/dev/null || true
-            systemctl disable ntp ntpd chrony chronyd 2>/dev/null || true
-            echo -e "  ${GREEN}✓ 已尝试停止系统 NTP 服务${NC}"
+        echo -e "  ${YELLOW}⚠ UDP ${ntp_host_port} 端口已被占用${NC}"
+        if [ "$ntp_host_port" = "123" ]; then
+            echo -e "  ${BLUE}  通常为系统已运行 ntpd/chrony 服务导致:${NC}"
+            echo -e "  ${CYAN}  systemctl stop ntp ntpd chrony chronyd 2>/dev/null${NC}"
+            echo ""
+            read -p "  是否尝试自动停止系统 NTP 服务并继续? [y/N]: " stop_sys_ntp < /dev/tty
+            if [[ "$stop_sys_ntp" =~ ^[Yy]$ ]]; then
+                systemctl stop ntp ntpd chrony chronyd 2>/dev/null || true
+                systemctl disable ntp ntpd chrony chronyd 2>/dev/null || true
+                echo -e "  ${GREEN}✓ 已尝试停止系统 NTP 服务${NC}"
+            else
+                echo -e "  ${YELLOW}已取消，请手动处理端口冲突后重试。${NC}"
+                read -p "  按回车键返回..." -r < /dev/tty
+                return 1
+            fi
         else
-            echo -e "  ${YELLOW}已取消，请手动处理端口冲突后重试。${NC}"
+            echo -e "  ${RED}✗ 自定义端口 ${ntp_host_port} 已被占用，请更换其他端口重试。${NC}"
             read -p "  按回车键返回..." -r < /dev/tty
             return 1
         fi
     else
-        echo -e "  ${GREEN}✓ UDP 123 端口空闲，可以使用${NC}"
+        echo -e "  ${GREEN}✓ UDP ${ntp_host_port} 端口空闲，可以使用${NC}"
     fi
     echo ""
 
@@ -625,7 +641,7 @@ _setup_ntp_docker() {
             --name "$_NTP_CONTAINER_NAME" \
             --restart=always \
             --cap-add SYS_TIME \
-            -p 123:123/udp \
+            -p "${ntp_host_port}:123/udp" \
             -v "${ntp_conf_file}:/etc/ntpd.conf:ro" \
             cturra/ntp:latest
     else
@@ -633,7 +649,7 @@ _setup_ntp_docker() {
             --name "$_NTP_CONTAINER_NAME" \
             --restart=always \
             --cap-add SYS_TIME \
-            -p 123:123/udp \
+            -p "${ntp_host_port}:123/udp" \
             -e NTP_SERVERS="${ntp_upstream}" \
             cturra/ntp:latest
     fi
@@ -642,7 +658,7 @@ _setup_ntp_docker() {
         echo ""
         echo -e "  ${GREEN}🎉 NTP 服务器容器已成功启动！${NC}"
         echo -e "  ${CYAN}  容器名称: ${_NTP_CONTAINER_NAME}${NC}"
-        echo -e "  ${CYAN}  监听端口: UDP 123${NC}"
+        echo -e "  ${CYAN}  监听端口: 宿主机 UDP ${ntp_host_port} -> 容器内部 UDP 123${NC}"
         if [ "$offline_mode" = true ]; then
             echo -e "  ${CYAN}  运行模式: 纯内网/离线孤岛模式 (自动挂载 ${ntp_conf_file})${NC}"
             echo -e "  ${CYAN}  授时基准: 本机硬件时钟 (RTC/Local Clock 127.127.1.0 stratum 10)${NC}"
@@ -650,6 +666,19 @@ _setup_ntp_docker() {
             echo -e "  ${CYAN}  上游服务: ${ntp_upstream}${NC}"
         fi
         echo -e "  ${CYAN}  重启策略: always（开机自启）${NC}"
+        echo ""
+        echo -e "  ${YELLOW}📌 防火墙放行提示 (若 A 端开启了防火墙，请执行以下命令放行):${NC}"
+        echo -e "    UFW (Ubuntu/Debian)      : ${CYAN}sudo ufw allow ${ntp_host_port}/udp${NC}"
+        echo -e "    Firewalld (RHEL/CentOS)  : ${CYAN}sudo firewall-cmd --permanent --add-port=${ntp_host_port}/udp && sudo firewall-cmd --reload${NC}"
+        echo -e "    Iptables                 : ${CYAN}sudo iptables -A INPUT -p udp --dport ${ntp_host_port} -j ACCEPT${NC}"
+        echo ""
+        echo -e "  ${GREEN}💡 B 客户端连接提示:${NC}"
+        if [ "$ntp_host_port" = "123" ]; then
+            echo -e "    Chrony 配置语法: ${CYAN}server <A端主机IP> iburst${NC}"
+        else
+            echo -e "    Chrony 配置语法: ${CYAN}server <A端主机IP> port ${ntp_host_port} iburst${NC}"
+        fi
+        echo -e "    可在 B 机器直接运行本脚本，选择菜单 [4] 即可自动完成客户端安装、配置与即时同步！"
         echo ""
         echo -e "  ${YELLOW}⏳ 等待 NTP 服务初始化（约 30 秒后可进行健康检测）...${NC}"
     else
@@ -955,52 +984,216 @@ _check_ntp_health() {
     read -p "  按回车键返回..." -r < /dev/tty
 }
 
-# ================================================================
-# 功能 4：生成时间同步脚本并配置开机自启
-# ================================================================
-_setup_ntp_sync_service() {
-    clear
-    _time_header "配置时间同步脚本 + 开机自启"
+# ----------------------------------------------------------------
+# 辅助：离线包优先安装 Chrony
+# ----------------------------------------------------------------
+_auto_install_chrony() {
+    if command -v chronyd &>/dev/null || command -v chronyc &>/dev/null; then
+        return 0
+    fi
+
+    echo -e "  ${BLUE}正在检测并安装 Chrony 客户端...${NC}"
+    local base_dir
+    base_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    local deb_dir="${base_dir}/system/packages/deb"
+    local rpm_dir="${base_dir}/system/packages/rpm"
+
+    # 1. 优先尝试本地离线 deb 包 (Debian/Ubuntu/麒麟桌面/统信UOS)
+    if command -v dpkg &>/dev/null; then
+        local deb_pkg
+        deb_pkg=$(ls "${deb_dir}"/chrony*.deb 2>/dev/null | head -n 1)
+        if [ -n "$deb_pkg" ] && [ -f "$deb_pkg" ]; then
+            echo -e "  ${CYAN}📦 发现本地离线 deb 安装包: $(basename "$deb_pkg")${NC}"
+            dpkg -i "$deb_pkg" &>/dev/null
+            if command -v chronyd &>/dev/null || command -v chronyc &>/dev/null; then
+                echo -e "  ${GREEN}✓ 离线安装 Chrony 成功！${NC}"
+                return 0
+            fi
+        fi
+    # 2. 优先尝试本地离线 rpm 包 (CentOS/RHEL/麒麟Server/Euler/Rocky)
+    elif command -v rpm &>/dev/null; then
+        local rpm_pkg
+        rpm_pkg=$(ls "${rpm_dir}"/chrony*.rpm 2>/dev/null | head -n 1)
+        if [ -n "$rpm_pkg" ] && [ -f "$rpm_pkg" ]; then
+            echo -e "  ${CYAN}📦 发现本地离线 rpm 安装包: $(basename "$rpm_pkg")${NC}"
+            rpm -ivh --nodeps "$rpm_pkg" &>/dev/null
+            if command -v chronyd &>/dev/null || command -v chronyc &>/dev/null; then
+                echo -e "  ${GREEN}✓ 离线安装 Chrony 成功！${NC}"
+                return 0
+            fi
+        fi
+    fi
+
+    # 3. 回退到在线包管理器安装
+    echo -e "  ${YELLOW}未发现有效本地离线包，尝试系统在线包管理器...${NC}"
+    if command -v apt &>/dev/null; then
+        apt update -qq 2>/dev/null
+        apt install -y chrony &>/dev/null
+    elif command -v dnf &>/dev/null; then
+        dnf install -y chrony &>/dev/null
+    elif command -v yum &>/dev/null; then
+        yum install -y chrony &>/dev/null
+    elif command -v apk &>/dev/null; then
+        apk add chrony &>/dev/null
+    fi
+
+    if command -v chronyd &>/dev/null || command -v chronyc &>/dev/null; then
+        echo -e "  ${GREEN}✓ 在线安装 Chrony 成功！${NC}"
+        return 0
+    fi
+
+    echo -e "  ${RED}✗ 自动安装 Chrony 失败，请使用菜单 [7] 或系统包管理器手动安装。${NC}"
+    return 1
+}
+
+# ----------------------------------------------------------------
+# B 客户端实现 1: Chrony 守护进程配置、立即同步与状态自检
+# ----------------------------------------------------------------
+_setup_chrony_client() {
+    local target_ip="$1"
+    local target_port="${2:-123}"
+
+    echo -e "${BLUE}[3/5] 检测并准备 Chrony 环境...${NC}"
+    if ! command -v chronyc &>/dev/null; then
+        _auto_install_chrony
+        if ! command -v chronyc &>/dev/null; then
+            echo -e "  ${RED}✗ 未找到 chronyc 工具，无法继续配置 Chrony 模式${NC}"
+            read -p "  按回车键返回..." -r < /dev/tty
+            return 1
+        fi
+    else
+        echo -e "  ${GREEN}✓ Chrony 工具已就绪${NC}"
+    fi
     echo ""
 
-    # --- 4.1 确认 Systemd 环境 ---
-    echo -e "${BLUE}[1/4] 检测 Systemd 环境...${NC}"
+    echo -e "${BLUE}[4/5] 生成 Chrony 配置文件并启动服务...${NC}"
+    local conf_file="/etc/chrony/chrony.conf"
+    if [ -f "/etc/chrony.conf" ] || [ ! -d "/etc/chrony" ]; then
+        conf_file="/etc/chrony.conf"
+    fi
+
+    # 备份现有配置
+    if [ -f "$conf_file" ]; then
+        cp "$conf_file" "${conf_file}.bak_$(date +%Y%m%d%H%M%S)" 2>/dev/null
+        echo -e "  ${CYAN}已备份原配置: ${conf_file}.bak_*${NC}"
+    fi
+
+    # 确定 driftfile 目录
+    local drift_file="/var/lib/chrony/drift"
+    if [ -d "/var/lib/chrony" ]; then
+        drift_file="/var/lib/chrony/drift"
+    elif [ -d "/var/lib/ntp" ]; then
+        drift_file="/var/lib/ntp/drift"
+    fi
+    mkdir -p "$(dirname "$drift_file")" /var/log/chrony 2>/dev/null
+
+    local server_line="server ${target_ip} iburst"
+    if [ "$target_port" != "123" ]; then
+        server_line="server ${target_ip} port ${target_port} iburst"
+    fi
+
+    cat > "$conf_file" << CHRONY_CONF_EOF
+# ============================================================
+# Chrony 客户端同步配置 (由 Linux-ops-box 自动生成)
+# 目标服务端 (A端): ${target_ip}:${target_port}
+# ============================================================
+
+${server_line}
+
+# 允许前 3 次时钟更新使用步进(step)快速消除大偏差，阈值 1 秒
+makestep 1.0 3
+
+# 自动将系统时间写回内核硬件时钟 (RTC)
+rtcsync
+
+# 时钟漂移记录
+driftfile ${drift_file}
+
+# 日志输出目录
+logdir /var/log/chrony
+CHRONY_CONF_EOF
+
+    echo -e "  ${GREEN}✓ 客户端配置已写入: ${conf_file}${NC}"
+
+    local srv_name="chrony"
+    if command -v systemctl &>/dev/null; then
+        if systemctl list-unit-files chronyd.service &>/dev/null 2>&1 | grep -q chronyd; then
+            srv_name="chronyd"
+        fi
+        systemctl daemon-reload 2>/dev/null
+        systemctl unmask "$srv_name" 2>/dev/null
+        systemctl enable "$srv_name" 2>/dev/null
+        systemctl restart "$srv_name" 2>/dev/null
+        if systemctl is-active "$srv_name" &>/dev/null; then
+            echo -e "  ${GREEN}✓ ${srv_name} 服务已启动并设置开机自启${NC}"
+        else
+            echo -e "  ${YELLOW}⚠ 服务状态异常，尝试直接启动 chronyd 进程...${NC}"
+            chronyd 2>/dev/null || true
+        fi
+    elif command -v service &>/dev/null; then
+        service chrony restart 2>/dev/null || service chronyd restart 2>/dev/null
+        echo -e "  ${GREEN}✓ Chrony 服务已重启${NC}"
+    fi
+    echo ""
+
+    echo -e "${BLUE}[5/5] 立即执行强制步进同步与状态自检...${NC}"
+    echo -e "  ${CYAN}⏳ 正在向 A 端 (${target_ip}:${target_port}) 发起同步请求 (chronyc makestep)...${NC}"
+    sleep 2
+    local step_res
+    step_res=$(chronyc makestep 2>&1)
+    echo -e "  ${CYAN}  步进结果: ${step_res}${NC}"
+
+    # 写回硬件时钟
+    hwclock --systohc 2>/dev/null && echo -e "  ${GREEN}✓ 系统时间已写回硬件时钟 (RTC)${NC}" || \
+        echo -e "  ${YELLOW}⚠ hwclock 写入跳过（虚拟化/容器环境正常）${NC}"
+    echo ""
+
+    echo -e "${GREEN}══════════════ 📊 B 客户端同步状态报告 ══════════════${NC}"
+    echo -e "  ${CYAN}当前系统时间: $(date '+%Y-%m-%d %H:%M:%S %Z')${NC}"
+    echo ""
+    echo -e "  ${BLUE}1. 时钟源同步状态 (chronyc sources -v):${NC}"
+    chronyc sources -v 2>/dev/null || echo -e "  ${YELLOW}暂无法获取 sources 详情${NC}"
+    echo ""
+    echo -e "  ${BLUE}2. 时钟跟踪与偏差详情 (chronyc tracking):${NC}"
+    chronyc tracking 2>/dev/null || echo -e "  ${YELLOW}暂无法获取 tracking 详情${NC}"
+    echo ""
+    echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
+    echo -e "  ${GREEN}🎉 B 客户端 Chrony 部署与同步配置完成！${NC}"
+    echo -e "  ${CYAN}  说明: Chrony 标记 '^*' 代表已锁定为主时钟源；若显示 '^?' 表明正在采样，几十秒内自动锁定。${NC}"
+    echo -e "  ${CYAN}  后续可随时在菜单 [3] 输入 ${target_ip}:${target_port} 进行健康连通性检测。${NC}"
+    echo ""
+    read -p "  按回车键返回..." -r < /dev/tty
+}
+
+# ----------------------------------------------------------------
+# B 客户端实现 2: Systemd 定时/开机同步脚本方式
+# ----------------------------------------------------------------
+_setup_script_client() {
+    local target_ip="$1"
+    local target_port="${2:-123}"
+
+    echo -e "${BLUE}[3/5] 检测 Systemd 与同步工具环境...${NC}"
     if ! command -v systemctl &>/dev/null; then
-        echo -e "  ${YELLOW}⚠ 当前系统不支持 Systemd，将尝试 cron 方式配置开机同步${NC}"
+        echo -e "  ${YELLOW}⚠ 当前系统不支持 Systemd，转为 cron 方式配置${NC}"
         _setup_ntp_sync_cron
         return
     fi
     echo -e "  ${GREEN}✓ Systemd 可用${NC}"
     echo ""
 
-    # --- 4.2 配置 NTP 服务器列表 ---
-    echo -e "${BLUE}[2/4] 配置同步目标 NTP 服务器...${NC}"
-    echo -e "  优先顺序: 本机 Docker NTP → 阿里云 → 腾讯云 → 国内公共 NTP"
-    echo -e "  默认列表: ${CYAN}127.0.0.1 ntp.aliyun.com ntp.tencent.com cn.ntp.org.cn${NC}"
-    read -p "  直接回车使用默认，或输入自定义（空格分隔）: " custom_ntp_list < /dev/tty
-    local ntp_list="127.0.0.1 ntp.aliyun.com ntp.tencent.com cn.ntp.org.cn"
-    if [ -n "$custom_ntp_list" ]; then
-        ntp_list="$custom_ntp_list"
-    fi
-    echo -e "  ${GREEN}✓ NTP 服务器列表: ${ntp_list}${NC}"
-    echo ""
-
-    # --- 4.3 生成同步脚本 ---
-    echo -e "${BLUE}[3/4] 生成同步脚本: ${_NTP_SYNC_SCRIPT}...${NC}"
-
+    echo -e "${BLUE}[4/5] 生成同步脚本: ${_NTP_SYNC_SCRIPT}...${NC}"
     cat > "$_NTP_SYNC_SCRIPT" << SCRIPT_EOF
 #!/bin/bash
 # ============================================================
 # NTP 时间同步脚本 (由 Linux-ops-box 自动生成)
-# 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
-# 优先使用本机 Docker NTP 容器，逐级回退到公网 NTP
+# 目标服务端: ${target_ip}:${target_port}
 # ============================================================
 
-NTP_SERVERS=(${ntp_list})
+TARGET_IP="${target_ip}"
+TARGET_PORT="${target_port}"
 LOG_FILE="/var/log/ntp-sync.log"
 LOCK_FILE="/var/run/ntp-sync.lock"
 
-# 防止重复运行
 [ -f "\$LOCK_FILE" ] && exit 0
 touch "\$LOCK_FILE"
 trap 'rm -f "\$LOCK_FILE"' EXIT
@@ -1009,81 +1202,41 @@ _log() {
     echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$*" >> "\$LOG_FILE"
 }
 
-_sync_with_ntpdate() {
-    local server="\$1"
-    if ntpdate -u -t 5 "\$server" >> "\$LOG_FILE" 2>&1; then
-        _log "ntpdate 同步成功 via \$server"
-        return 0
-    fi
-    return 1
-}
-
-_sync_with_chrony() {
-    if chronyc makestep >> "\$LOG_FILE" 2>&1; then
-        _log "chronyc makestep 同步成功"
-        return 0
-    fi
-    return 1
-}
-
-_sync_with_timedatectl() {
-    if timedatectl set-ntp true >> "\$LOG_FILE" 2>&1; then
-        _log "timedatectl NTP 已启用"
-        return 0
-    fi
-    return 1
-}
-
-# === 主同步逻辑 ===
-_log "=== 开始 NTP 时间同步 ==="
-
+_log "=== 开始时间同步 (目标: \${TARGET_IP}:\${TARGET_PORT}) ==="
 synced=false
 
-# 方式1: ntpdate 逐服务器尝试
-if command -v ntpdate &>/dev/null; then
-    for srv in "\${NTP_SERVERS[@]}"; do
-        if _sync_with_ntpdate "\$srv"; then
-            synced=true
-            break
-        fi
-        _log "ntpdate via \$srv 失败，尝试下一个..."
-    done
+if [ "\$TARGET_PORT" = "123" ] && command -v ntpdate &>/dev/null; then
+    if ntpdate -u -t 5 "\$TARGET_IP" >> "\$LOG_FILE" 2>&1; then
+        _log "ntpdate 同步成功"
+        synced=true
+    fi
 fi
 
-# 方式2: chronyc fallback
 if [ "\$synced" = false ] && command -v chronyc &>/dev/null; then
-    _sync_with_chrony && synced=true
+    if chronyc makestep >> "\$LOG_FILE" 2>&1; then
+        _log "chronyc makestep 同步成功"
+        synced=true
+    fi
 fi
 
-# 方式3: timedatectl fallback
-if [ "\$synced" = false ] && command -v timedatectl &>/dev/null; then
-    _sync_with_timedatectl && synced=true
-fi
-
-# 同步系统时间写入硬件时钟
 if [ "\$synced" = true ]; then
-    _log "同步成功，尝试将系统时间写回硬件时钟 (hwclock --systohc)..."
-    hwclock --systohc >> "\$LOG_FILE" 2>&1 || _log "hwclock 写入跳过（容器/虚拟机环境）"
-    _log "=== 同步完成 ==="
+    hwclock --systohc >> "\$LOG_FILE" 2>&1 || true
+    _log "=== 同步完成并已写回硬件时钟 ==="
     exit 0
 else
-    _log "=== 所有 NTP 服务器均无法连接，同步失败 ==="
+    _log "=== 同步尝试失败 ==="
     exit 1
 fi
 SCRIPT_EOF
 
     chmod +x "$_NTP_SYNC_SCRIPT"
     echo -e "  ${GREEN}✓ 同步脚本已生成: ${_NTP_SYNC_SCRIPT}${NC}"
-    echo ""
-
-    # --- 4.4 注册 Systemd 服务 ---
-    echo -e "${BLUE}[4/4] 注册 Systemd 开机自启服务...${NC}"
 
     cat > "$_NTP_SERVICE_FILE" << SERVICE_EOF
 [Unit]
 Description=NTP Time Sync Service (Linux-ops-box)
 Documentation=https://github.com/kikock/Linux-ops-box
-After=network-online.target docker.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -1098,22 +1251,55 @@ WantedBy=multi-user.target
 SERVICE_EOF
 
     systemctl daemon-reload
-    systemctl enable ntp-sync.service
+    systemctl enable ntp-sync.service &>/dev/null
+    echo -e "  ${GREEN}✓ Systemd 服务已注册并启用开机自启${NC}"
+    echo ""
+
+    echo -e "${BLUE}[5/5] 立即执行测试同步与状态自检...${NC}"
+    bash "$_NTP_SYNC_SCRIPT"
     if [ $? -eq 0 ]; then
-        echo -e "  ${GREEN}✓ Systemd 服务已注册并启用开机自启${NC}"
+        echo -e "  ${GREEN}✓ 脚本执行同步成功！当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')${NC}"
     else
-        echo -e "  ${RED}✗ 服务注册失败，请手动检查${NC}"
+        echo -e "  ${YELLOW}⚠ 初次同步未成功或无输出，请检查 /var/log/ntp-sync.log 日志${NC}"
     fi
 
     echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e " ${GREEN}🎉 配置完成！${NC}"
-    echo -e "  ${CYAN}同步脚本 : ${_NTP_SYNC_SCRIPT}${NC}"
-    echo -e "  ${CYAN}服务文件 : ${_NTP_SERVICE_FILE}${NC}"
-    echo -e "  ${CYAN}同步日志 : /var/log/ntp-sync.log${NC}"
-    echo -e "  ${YELLOW}立即测试 : systemctl start ntp-sync.service${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     read -p "  按回车键返回..." -r < /dev/tty
+}
+
+# ================================================================
+# 功能 4：配置客户端时间同步 + 开机自启 (B端/客户端)
+# ================================================================
+_setup_ntp_sync_service() {
+    clear
+    _time_header "配置客户端时间同步 (B端/客户端)"
+    echo ""
+
+    echo -e "${BLUE}[1/5] 配置目标 NTP 服务器地址与端口 (A端服务端)...${NC}"
+    echo -e "  说明: 请输入 A 端 NTP 服务器的 IP 地址以及 UDP 端口（默认 123）。"
+    read -p "  请输入 A 端 NTP 服务器 IP 地址 [默认: 127.0.0.1]: " target_ip < /dev/tty
+    target_ip="${target_ip:-127.0.0.1}"
+    read -p "  请输入 A 端 NTP 服务 UDP 端口 [直接回车=123]: " target_port < /dev/tty
+    target_port="${target_port:-123}"
+    if ! [[ "$target_port" =~ ^[0-9]+$ ]] || [ "$target_port" -lt 1 ] || [ "$target_port" -gt 65535 ]; then
+        target_port=123
+    fi
+    echo -e "  ${GREEN}✓ 目标 NTP 服务: ${target_ip}:${target_port}${NC}"
+    echo ""
+
+    echo -e "${BLUE}[2/5] 选择客户端同步方式...${NC}"
+    echo -e "  1. ${GREEN}Chrony 守护进程模式${NC} (强烈推荐) — 支持任意自定义端口，精度高，平滑时钟微调，开机自动步进"
+    echo -e "  2. ${CYAN}Systemd 单次/定时同步脚本模式${NC} — 基于脚本轻量执行，适合资源严苛环境"
+    echo ""
+    read -p "  请选择同步方式 [1-2，直接回车=1]: " sync_mode_choice < /dev/tty
+    sync_mode_choice="${sync_mode_choice:-1}"
+    echo ""
+
+    if [ "$sync_mode_choice" = "1" ]; then
+        _setup_chrony_client "$target_ip" "$target_port"
+    else
+        _setup_script_client "$target_ip" "$target_port"
+    fi
 }
 
 # ================================================================
@@ -1343,8 +1529,8 @@ time_management_menu() {
         echo -e " 1. 查看硬件时钟 (RTC) 状态"
         echo -e " 3. 检测 NTP 服务器健康状态"
         echo -e "${GREEN}══════════════ 🚀 部署与配置 ══════════════${NC}"
-        echo -e " 2. 部署 Docker NTP 服务器"
-        echo -e " 4. 配置时间同步脚本 (开机自启)"
+        echo -e " 2. 部署 Docker NTP 服务器 (A端/服务端，支持自定义端口与离线孤岛)"
+        echo -e " 4. 配置客户端同步与开机自启 (B端/客户端，支持 Chrony/脚本、立即同步及自检)"
         echo -e "${GREEN}══════════════ ⚡ 操作 ════════════════════${NC}"
         echo -e " 6. 立即手动同步时间"
         echo -e " 5. 停止并清理 NTP 服务"
