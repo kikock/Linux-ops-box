@@ -1516,6 +1516,140 @@ _draw_time_status_bar() {
 }
 
 # ================================================================
+# 功能：校验客户端时间同步与开机自启状态 (B端专属检测)
+# ================================================================
+_check_client_sync_status() {
+    clear
+    _time_header "客户端时间同步与开机自启状态校验 (B端)"
+    echo ""
+
+    echo -e "${BLUE}正在对当前主机进行客户端时间同步体系全项体检...${NC}"
+    echo ""
+
+    local srv_name=""
+    local srv_active=false
+    local srv_enabled=false
+    local mode_desc="未知"
+
+    # 1. 检测 Chrony 守护进程
+    if command -v chronyd &>/dev/null || command -v chronyc &>/dev/null; then
+        mode_desc="Chrony 守护进程模式"
+        if systemctl list-unit-files chrony.service &>/dev/null 2>&1 | grep -q chrony; then
+            srv_name="chrony"
+        elif systemctl list-unit-files chronyd.service &>/dev/null 2>&1 | grep -q chronyd; then
+            srv_name="chronyd"
+        fi
+    fi
+
+    # 2. 检测 Systemd 同步脚本模式
+    if [ -z "$srv_name" ] && [ -f "$_NTP_SERVICE_FILE" ]; then
+        mode_desc="Systemd 脚本自启模式"
+        srv_name="ntp-sync.service"
+    fi
+
+    echo -e "${GREEN}══════════════ [1/4] 服务运行状态 ══════════════${NC}"
+    if [ -n "$srv_name" ] && command -v systemctl &>/dev/null; then
+        local srv_status
+        srv_status=$(systemctl is-active "$srv_name" 2>/dev/null)
+        if [ "$srv_status" = "active" ]; then
+            srv_active=true
+            echo -e "  服务名称: ${CYAN}${srv_name}${NC}"
+            echo -e "  运行状态: ${GREEN}✓ 运行中 (active)${NC}"
+            echo -e "  同步模式: ${CYAN}${mode_desc}${NC}"
+        else
+            echo -e "  服务名称: ${CYAN}${srv_name}${NC}"
+            echo -e "  运行状态: ${RED}✗ 未运行 (${srv_status})${NC}"
+        fi
+    elif pgrep -x chronyd &>/dev/null; then
+        srv_active=true
+        echo -e "  运行状态: ${GREEN}✓ chronyd 进程运行中 (PID: $(pgrep -x chronyd | head -1))${NC}"
+    else
+        echo -e "  运行状态: ${YELLOW}⚠ 未检测到活跃的 Chrony 或 ntp-sync 客户端服务${NC}"
+    fi
+    echo ""
+
+    echo -e "${GREEN}══════════════ [2/4] 开机自启状态 ══════════════${NC}"
+    if [ -n "$srv_name" ] && command -v systemctl &>/dev/null; then
+        local enable_status
+        enable_status=$(systemctl is-enabled "$srv_name" 2>/dev/null)
+        if [ "$enable_status" = "enabled" ]; then
+            srv_enabled=true
+            echo -e "  开机自启: ${GREEN}✓ 已启用 (enabled)${NC} — 系统开机将自动启动并同步"
+        elif [ "$enable_status" = "disabled" ]; then
+            echo -e "  开机自启: ${YELLOW}⚠ 已禁用 (disabled)${NC} — 可通过 systemctl enable ${srv_name} 开启"
+        else
+            echo -e "  开机自启: ${YELLOW}⚠ ${enable_status:-未配置}${NC}"
+        fi
+    elif [ -f /etc/rc.local ] && grep -q "ntp-sync" /etc/rc.local; then
+        srv_enabled=true
+        echo -e "  开机自启: ${GREEN}✓ 已配置在 /etc/rc.local${NC}"
+    else
+        echo -e "  开机自启: ${YELLOW}⚠ 未检测到开机自启配置${NC}"
+    fi
+    echo ""
+
+    echo -e "${GREEN}══════════════ [3/4] 时钟源锁定与偏差详情 ══════════════${NC}"
+    local is_synced=false
+    local synced_ip=""
+    local offset_val=""
+
+    if command -v chronyc &>/dev/null; then
+        echo -e "  ${BLUE}1. 时钟源同步列表 (chronyc sources -v):${NC}"
+        local sources_output
+        sources_output=$(chronyc sources -v 2>/dev/null)
+        echo "$sources_output" | sed 's/^/    /'
+
+        if echo "$sources_output" | grep -q '^\^\*'; then
+            is_synced=true
+            synced_ip=$(echo "$sources_output" | grep '^\^\*' | awk '{print $2}')
+            offset_val=$(echo "$sources_output" | grep '^\^\*' | awk '{print $NF}')
+        fi
+
+        echo ""
+        echo -e "  ${BLUE}2. 时钟跟踪详情 (chronyc tracking):${NC}"
+        chronyc tracking 2>/dev/null | sed 's/^/    /'
+    elif command -v timedatectl &>/dev/null; then
+        echo -e "  ${BLUE}系统 timedatectl 状态:${NC}"
+        timedatectl status 2>/dev/null | sed 's/^/    /'
+        local ntp_stat
+        ntp_stat=$(timedatectl show --property=NTPSynchronized --value 2>/dev/null)
+        [ "$ntp_stat" = "yes" ] && is_synced=true
+    fi
+    echo ""
+
+    echo -e "${GREEN}══════════════ [4/4] 硬件时钟 (RTC) 状态 ══════════════${NC}"
+    local sys_now
+    sys_now=$(date '+%Y-%m-%d %H:%M:%S %Z')
+    echo -e "  当前系统时间: ${CYAN}${sys_now}${NC}"
+    if hwclock --show &>/dev/null 2>&1; then
+        local rtc_now
+        rtc_now=$(hwclock --show 2>/dev/null)
+        echo -e "  主板硬件时钟: ${GREEN}✓ 可用 (${rtc_now})${NC}"
+    else
+        echo -e "  主板硬件时钟: ${YELLOW}⚠ 无法直接读取（虚拟化/容器环境属于正常现象）${NC}"
+    fi
+    echo ""
+
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "  ${BLUE}📊 综合校验评估结论:${NC}"
+    if [ "$srv_active" = true ] && [ "$srv_enabled" = true ] && [ "$is_synced" = true ]; then
+        echo -e "  ${GREEN}🎉 【状态极佳】B 客户端运行正常，开机自启已生效，已成功锁定主时钟源！${NC}"
+        [ -n "$synced_ip" ] && echo -e "     ${CYAN}• 锁定时间源 : ${synced_ip}${NC}"
+        [ -n "$offset_val" ] && echo -e "     ${CYAN}• 最新时间误差: ${offset_val}${NC}"
+    elif [ "$srv_active" = true ] && [ "$is_synced" = false ]; then
+        echo -e "  ${YELLOW}⏳ 【正在采样收敛】客户端服务运行正常，正处于初次握手滤波阶段。${NC}"
+        echo -e "     通常需几十秒（约 3~4 次心跳包）评估抖动后自动完全锁定为 ^*。"
+    elif [ "$srv_active" = false ]; then
+        echo -e "  ${RED}✗ 【服务未运行】请选择主菜单 [2] 重新配置并启动客户端。${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ 【部分正常】建议核对上方各项详情。${NC}"
+    fi
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    read -p "  按回车键返回..." -r < /dev/tty
+}
+
+# ================================================================
 # 主入口：时间管理中心 TUI 菜单
 # ================================================================
 time_management_menu() {
@@ -1525,30 +1659,32 @@ time_management_menu() {
         echo -e "${CYAN}          ⏰  系统时间管理中心  ⏰                    ${NC}"
         echo -e "${CYAN}======================================================${NC}"
         _draw_time_status_bar
-        echo -e "${GREEN}══════════════ 🔍 检测与诊断 ══════════════${NC}"
-        echo -e " 1. 查看硬件时钟 (RTC) 状态"
-        echo -e " 3. 检测 NTP 服务器健康状态"
         echo -e "${GREEN}══════════════ 🚀 部署与配置 ══════════════${NC}"
-        echo -e " 2. 部署 Docker NTP 服务器 (A端/服务端，支持自定义端口与离线孤岛)"
-        echo -e " 4. 配置客户端同步与开机自启 (B端/客户端，支持 Chrony/脚本、立即同步及自检)"
-        echo -e "${GREEN}══════════════ ⚡ 操作 ════════════════════${NC}"
-        echo -e " 6. 立即手动同步时间"
-        echo -e " 5. 停止并清理 NTP 服务"
+        echo -e " 1. 部署 Docker NTP 服务器 (A端/服务端，支持自定义端口与离线孤岛)"
+        echo -e " 2. 配置客户端同步与开机自启 (B端/客户端，支持 Chrony/脚本、即时同步)"
+        echo -e "${GREEN}══════════════ 🔍 检测与诊断 ══════════════${NC}"
+        echo -e " 3. 校验客户端同步与开机自启状态 (B端，检测服务/自启/时钟源/偏差)"
+        echo -e " 4. 检测 NTP 服务器健康状态 (可测本机或远程 A端 IP:端口)"
+        echo -e " 5. 查看硬件时钟 (RTC/hwclock) 状态与对齐"
+        echo -e "${GREEN}══════════════ ⚡ 运维与操作 ══════════════${NC}"
+        echo -e " 6. 立即手动同步系统时间"
+        echo -e " 7. 停止并清理 NTP 服务 (容器/自启服务/脚本)"
         echo -e "${GREEN}══════════════ 🔧 工具管理 ════════════════${NC}"
-        echo -e " 7. 安装 NTP 客户端工具 (ntpdate / chrony)"
+        echo -e " 8. 安装 NTP 客户端工具 (离线/在线一键安装 chrony / ntpdate)"
         echo -e "${GREEN}==============================================${NC}"
         echo -e " 0. 返回主菜单"
         echo -e "${GREEN}==============================================${NC}"
-        read -p "请输入选项 [0-7]: " time_choice < /dev/tty
+        read -p "请输入选项 [0-8]: " time_choice < /dev/tty
 
         case "$time_choice" in
-            1) _check_hwclock ;;
-            2) _setup_ntp_docker ;;
-            3) _check_ntp_health ;;
-            4) _setup_ntp_sync_service ;;
-            5) _remove_ntp_setup ;;
+            1) _setup_ntp_docker ;;
+            2) _setup_ntp_sync_service ;;
+            3) _check_client_sync_status ;;
+            4) _check_ntp_health ;;
+            5) _check_hwclock ;;
             6) _manual_sync_time ;;
-            7) _install_ntp_tools ;;
+            7) _remove_ntp_setup ;;
+            8) _install_ntp_tools ;;
             0)
                 echo -e "${BLUE}返回中...${NC}"
                 break

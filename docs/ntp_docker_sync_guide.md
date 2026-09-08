@@ -140,7 +140,7 @@ cd /data/ntp && docker compose up -d
 ##### 方式 A：通过工具箱 TUI 菜单纯离线一键安装（推荐）
 ```bash
 bash system/system_init.sh
-# 依次进入：[14] 系统时间管理中心 → [7] 安装 NTP 客户端工具
+# 依次进入：[14] 系统时间管理中心 → [8] 安装 NTP 客户端工具
 # 脚本自动检测到本地 system/packages 离线包，选择：
 # [5] 纯内网/离线安装（使用本地 system/packages 离线包）
 ```
@@ -196,7 +196,7 @@ sudo hwclock --show
 >    ```bash
 >    bash system/system_init.sh
 >    ```
-> 2. 进入 `[14] 系统时间管理中心` → 选择 `[2] 部署 Docker NTP 服务器`；
+> 2. 进入 `[14] 系统时间管理中心` → 选择 `[1] 部署 Docker NTP 服务器`；
 > 3. 在运行模式中选择 **`[2] 纯内网/离线孤岛模式`**：
 >    脚本会自动检测并校准硬件时钟、全自动创建 `/etc/ntp-docker/ntpd.conf` 并带 `-v` 挂载参数一键启动容器！
 > 
@@ -316,13 +316,14 @@ timeout 3 bash -c 'exec 9<>/dev/udp/127.0.0.1/123 && printf "\x1b\x00\x00\x00\x0
 >    ```bash
 >    bash system/system_init.sh
 >    ```
-> 2. 进入 `[14] 系统时间管理中心` → 选择 **`[4] 配置客户端同步与开机自启`**；
+> 2. 进入 `[14] 系统时间管理中心` → 选择 **`[2] 配置客户端同步与开机自启`**；
 > 3. 输入 A 端 IP（如 `192.168.1.100`）及 UDP 端口（默认 123，若 A 端修改了端口如 1123 则填入 1123）；
 > 4. 选择 **`[1] Chrony 守护进程模式`**：
 >    - 脚本优先从本地 `system/packages/` 提取离线 deb/rpm 包零依赖极速安装；
 >    - 自动生成适配端口的客户端配置并注册开机自启；
 >    - 立即执行 `chronyc makestep` 强制消除时间偏差，并将系统时间写回硬件时钟 `hwclock --systohc`；
 >    - 自动打印当前时钟源与时间偏移跟踪报告（`chronyc sources -v`、`chronyc tracking`）！
+> 5. **随时复查验证**：在时间管理菜单随时选择 **`[3] 校验客户端同步与开机自启状态`**，一键体检服务运行、开机自启（enabled）、时钟源锁定（`^*`）与 RTC 状态！
 
 #### 步骤 1：安装 Chrony
 - **Ubuntu / Debian**:
