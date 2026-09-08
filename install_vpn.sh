@@ -55,7 +55,7 @@ _get_gh_mirror() {
         if curl -Is -m 3 "https://github.com" | head -1 | grep -q '200\|301\|302'; then
             echo "https://github.com"
         else
-            echo "https://ghproxy.net/https://github.com"
+            echo "https://ghfast.top/https://github.com"
         fi
     fi
 }

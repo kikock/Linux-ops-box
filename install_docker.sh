@@ -61,11 +61,12 @@ _get_gh_mirror() {
             # 注意：此处因是子 shell 变量捕获调用，所有的进度交互提示 echo 必须重定向至标准错误 >&2
             echo -e "  ${YELLOW}⏳ GitHub 直连受阻，正在智能探测并分配国内可用加速通道...${NC}" >&2
             local candidates=(
+                "https://ghfast.top"
                 "https://ghproxy.net"
-                "https://mirror.ghproxy.com"
+                "https://gh.llkk.cc"
                 "https://gh-proxy.com"
             )
-            local best_mirror="https://ghproxy.net/https://github.com" # 默认兜底
+            local best_mirror="https://ghfast.top/https://github.com" # 默认兜底
             local matched=false
             
             for candidate in "${candidates[@]}"; do

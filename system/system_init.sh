@@ -188,15 +188,17 @@ _test_proxy_speed() {
 _update_toolbox() {
     local PROXIES=(
         "https://github.com"
+        "https://ghfast.top"
         "https://ghproxy.net"
-        "https://mirror.ghproxy.com"
+        "https://gh.llkk.cc"
         "https://gh-proxy.com"
     )
     local PROXY_NAMES=(
-        "🌐 GitHub 官方直连 (https://github.com)"
-        "🚀 加速通道 A: GHProxy.net (国内推荐)"
-        "🚀 加速通道 B: Mirror.ghproxy.com (备用)"
-        "🚀 加速通道 C: GH-proxy.com (备用)"
+        "🌐 海外直连即可 (https://github.com)"
+        "🚀 加速通道 A: https://ghfast.top/"
+        "🚀 加速通道 B: https://ghproxy.net/"
+        "🚀 加速通道 C: https://gh.llkk.cc/"
+        "🚀 加速通道 D: https://gh-proxy.com/"
     )
 
     if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
@@ -220,10 +222,11 @@ _update_toolbox() {
         echo -e " 3. ${PROXY_NAMES[1]}"
         echo -e " 4. ${PROXY_NAMES[2]}"
         echo -e " 5. ${PROXY_NAMES[3]}"
-        echo -e " 6. ✏️  手动输入自定义加速前缀"
+        echo -e " 6. ${PROXY_NAMES[4]}"
+        echo -e " 7. ✏️  手动输入自定义加速前缀"
         echo -e " 0. ↩ 返回主菜单"
         echo -e "${CYAN}======================================================${NC}"
-        read -p "请输入选项 [0-6]: " proxy_choice < /dev/tty
+        read -p "请输入选项 [0-7]: " proxy_choice < /dev/tty
 
         case $proxy_choice in
             1)
@@ -268,7 +271,8 @@ _update_toolbox() {
             3) CHOSEN_PROXY="${PROXIES[1]}" ;;
             4) CHOSEN_PROXY="${PROXIES[2]}" ;;
             5) CHOSEN_PROXY="${PROXIES[3]}" ;;
-            6)
+            6) CHOSEN_PROXY="${PROXIES[4]}" ;;
+            7)
                 echo -e "\n请输入您的自定义 GitHub 加速前缀（如 https://github.akams.cn/）："
                 read -p "前缀 URL: " custom_prefix < /dev/tty
                 if [ -z "$custom_prefix" ]; then

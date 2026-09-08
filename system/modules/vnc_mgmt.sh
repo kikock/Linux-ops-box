@@ -65,7 +65,7 @@ vnc_install_instance() {
         else
             if command -v curl &>/dev/null; then
                 if ! curl -Is -m 3 "https://github.com" | head -1 | grep -q '200\|301\|302'; then
-                    GH_MIRROR="https://ghproxy.net/https://github.com"
+                    GH_MIRROR="https://ghfast.top/https://github.com"
                 fi
             fi
         fi

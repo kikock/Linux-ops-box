@@ -19,7 +19,7 @@
 ### 快捷安装 (大陆加速版):
 
 ```bash
-curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_system.sh | sudo bash
+curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_system.sh | sudo bash
 ```
 
 > 安装完成后，在任何目录输入 `ck_sysinit` 即可呼出管理菜单；支持使用 `ck_sysinit --uninstall` 彻底清理环境。
@@ -67,7 +67,7 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 ### 快捷安装/运行 (大陆加速版):
 
 ```bash
-curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_docker.sh | sudo bash
+curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_docker.sh | sudo bash
 ```
 
 ### 核心功能:
@@ -86,7 +86,7 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 ### 快捷运行 (支持扫码一键联):
 
 ```bash
-curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_vpn.sh | sudo bash
+curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_vpn.sh | sudo bash
 ```
 
 ### 核心功能:
@@ -105,7 +105,7 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 ### 快捷安装 (大陆加速版):
 
 ```bash
-curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/scripts/naive_install.sh | sudo bash
+curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/scripts/naive_install.sh | sudo bash
 ```
 
 ### 核心功能:
@@ -123,7 +123,7 @@ curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops
 ### 快捷安装/配置 (主控端/独立拉取):
 
 ```bash
-curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_vnc.sh | sudo bash
+curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_vnc.sh | sudo bash
 ```
 
 ### 核心特性:
@@ -243,7 +243,7 @@ ck_sysinit --update
 # 彻底卸载
 ck_sysinit --uninstall
 # 或通过安装脚本卸载
-curl -sSL https://ghproxy.net/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_system.sh | sudo bash -s -- --uninstall
+curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/install_system.sh | sudo bash -s -- --uninstall
 ```
 
 ---

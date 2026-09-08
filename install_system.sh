@@ -108,8 +108,9 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
         else
             echo -e "${YELLOW}  ⚠ Github 直连受阻，正在智能探测并分配国内可用加速通道...${NC}"
             candidates=(
+                "https://ghfast.top"
                 "https://ghproxy.net"
-                "https://mirror.ghproxy.com"
+                "https://gh.llkk.cc"
                 "https://gh-proxy.com"
             )
             matched=false
@@ -139,7 +140,7 @@ if [ "$HAS_LOCAL_FILES" = false ]; then
             
             if [ "$matched" = "false" ]; then
                 echo -e "${RED}  ❌ 警告: 所有内置国内加速源均无法连通，将回退至默认加速源进行尝试。${NC}"
-                GH_MIRROR="https://ghproxy.net/https://github.com"
+                GH_MIRROR="https://ghfast.top/https://github.com"
             fi
         fi
     fi
