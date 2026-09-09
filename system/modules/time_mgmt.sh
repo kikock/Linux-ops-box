@@ -1174,16 +1174,110 @@ UNIT_EOF
     fi
     echo ""
 
-    echo -e "${BLUE}[5/5] 立即执行强制步进同步与状态自检...${NC}"
-    echo -e "  ${CYAN}⏳ 正在向 A 端 (${target_ip}:${target_port}) 发起同步请求 (chronyc makestep)...${NC}"
-    sleep 2
+    echo -e "${BLUE}[5/5] 立即强制步进对齐大偏差 + 状态自检...${NC}"
+    echo ""
+
+    # ──────────────────────────────────────────────────────────────
+    # 阶段 A: chronyd -q 单次模式 — 先暴力矫正大偏差
+    # ──────────────────────────────────────────────────────────────
+    # 原理: -q 模式让 chronyd 独立采样 NTP 包后立即 step 系统时钟并退出
+    #       无论偏差多大（3分钟/1小时均可瞬间矫正），不受 makestep 策略限制
+    #       必须先停掉守护进程，否则两个 chronyd 实例冲突
+    # ──────────────────────────────────────────────────────────────
+    echo -e "  ${CYAN}▶ 阶段 A: chronyd -q 单次强制矫正模式（处理大偏差 > 1 秒）${NC}"
+
+    local chrony_srv_expr
+    if [ "$target_port" = "123" ]; then
+        chrony_srv_expr="server ${target_ip} iburst"
+    else
+        chrony_srv_expr="server ${target_ip} port ${target_port} iburst"
+    fi
+
+    # 临时停掉守护进程以释放套接字，-q 完成后再重启
+    local _srv_was_active=false
+    if command -v systemctl &>/dev/null && systemctl is-active "$srv_name" &>/dev/null; then
+        _srv_was_active=true
+        systemctl stop "$srv_name" 2>/dev/null
+        pkill -9 chronyd 2>/dev/null || true
+        sleep 1
+    fi
+
+    echo -ne "  ${BLUE}  ⏳ 正在单次采样 A 端 [${target_ip}:${target_port}]...${NC}  "
+    local q_out q_rc
+    q_out=$(chronyd -q "$chrony_srv_expr" 2>&1)
+    q_rc=$?
+
+    if [ $q_rc -eq 0 ] || echo "$q_out" | grep -qiE "System clock|offset|stepped|adjust"; then
+        echo -e "${GREEN}✓ 大偏差矫正成功！${NC}"
+        # 显示矫正量
+        local step_line
+        step_line=$(echo "$q_out" | grep -iE "System clock|offset|step" | head -2)
+        [ -n "$step_line" ] && echo -e "    ${CYAN}└─ $(echo "$step_line" | tr '\n' '|' | sed 's/|$//')${NC}"
+    else
+        echo -e "${YELLOW}⚠ 单次模式未确认矫正（可能 A 端尚在收敛中）${NC}"
+        echo -e "    ${BLUE}输出: $(echo "$q_out" | tail -2)${NC}"
+    fi
+    echo ""
+
+    # ──────────────────────────────────────────────────────────────
+    # 阶段 B: 重启守护进程做持续精细跟踪
+    # ──────────────────────────────────────────────────────────────
+    echo -e "  ${CYAN}▶ 阶段 B: 重启 Chrony 守护进程做持续精细校准...${NC}"
+    pkill -9 chronyd 2>/dev/null || true
+    rm -f /var/run/chrony/chronyd.pid /var/run/chronyd.pid 2>/dev/null
+    sleep 1
+
+    if command -v systemctl &>/dev/null; then
+        systemctl start "$srv_name" 2>/dev/null || chronyd 2>/dev/null || true
+    elif command -v service &>/dev/null; then
+        service "$srv_name" start 2>/dev/null || chronyd 2>/dev/null || true
+    else
+        chronyd 2>/dev/null || true
+    fi
+
+    # ──────────────────────────────────────────────────────────────
+    # 阶段 C: 轮询等待守护进程真正锁定时钟源（最多等 30 秒）
+    # ──────────────────────────────────────────────────────────────
+    echo -ne "  ${CYAN}▶ 阶段 C: 等待守护进程锁定时钟源 (最多 30s)...${NC}"
+    local wait_sec=0
+    local locked=false
+    while [ $wait_sec -lt 30 ]; do
+        sleep 2
+        wait_sec=$(( wait_sec + 2 ))
+        # ^* 标记表示已选定主时钟源
+        if chronyc sources 2>/dev/null | grep -q '^\^\*'; then
+            locked=true
+            break
+        fi
+        echo -ne "."
+    done
+    echo ""
+
+    if [ "$locked" = true ]; then
+        echo -e "  ${GREEN}✓ 时钟源已锁定 (^*)！${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ 30 秒内未锁定（正常：守护进程继续后台采样，约 60 秒自动锁定）${NC}"
+    fi
+    echo ""
+
+    # ──────────────────────────────────────────────────────────────
+    # 阶段 D: makestep 再触发一次精细步进（消除采样抖动残差）
+    # ──────────────────────────────────────────────────────────────
+    echo -ne "  ${CYAN}▶ 阶段 D: chronyc makestep 精细步进残差...${NC}  "
     local step_res
     step_res=$(chronyc makestep 2>&1)
-    echo -e "  ${CYAN}  步进结果: ${step_res}${NC}"
+    if echo "$step_res" | grep -qiE "200 OK|Clock was stepped|stepped"; then
+        echo -e "${GREEN}✓ 精细步进完成${NC}"
+    else
+        echo -e "${BLUE}─ 已在公差内无需步进${NC}"
+    fi
+    echo ""
 
     # 写回硬件时钟
-    hwclock --systohc 2>/dev/null && echo -e "  ${GREEN}✓ 系统时间已写回硬件时钟 (RTC)${NC}" || \
-        echo -e "  ${YELLOW}⚠ hwclock 写入跳过（虚拟化/容器环境正常）${NC}"
+    echo -ne "  ${CYAN}▶ 写回硬件时钟 (hwclock --systohc)...${NC}  "
+    hwclock --systohc 2>/dev/null \
+        && echo -e "${GREEN}✓ 已更新${NC}" \
+        || echo -e "${YELLOW}⚠ 跳过（虚拟化/容器环境正常）${NC}"
     echo ""
 
     echo -e "${GREEN}══════════════ 📊 B 客户端同步状态报告 ══════════════${NC}"
@@ -1196,9 +1290,13 @@ UNIT_EOF
     chronyc tracking 2>/dev/null || echo -e "  ${YELLOW}暂无法获取 tracking 详情${NC}"
     echo ""
     echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
-    echo -e "  ${GREEN}🎉 B 客户端 Chrony 部署与同步配置完成！${NC}"
-    echo -e "  ${CYAN}  说明: Chrony 标记 '^*' 代表已锁定为主时钟源；若显示 '^?' 表明正在采样，几十秒内自动锁定。${NC}"
-    echo -e "  ${CYAN}  后续可随时在菜单 [3] 输入 ${target_ip}:${target_port} 进行健康连通性检测。${NC}"
+    if [ "$locked" = true ]; then
+        echo -e "  ${GREEN}🎉 B 客户端 Chrony 部署完成，时钟已与 A 端对齐！${NC}"
+    else
+        echo -e "  ${YELLOW}⚡ B 客户端 Chrony 部署完成，守护进程正在后台持续对齐，约 60s 内完全锁定。${NC}"
+    fi
+    echo -e "  ${CYAN}  • Chrony 标记 '^*' = 已锁定主时钟源  '^?' = 采样中（正常过渡态）${NC}"
+    echo -e "  ${CYAN}  • 后续可用菜单 [3] 随时查验 B 端同步状态与偏差值${NC}"
     echo ""
     read -p "  按回车键返回..." -r < /dev/tty
 }
@@ -1380,65 +1478,421 @@ CRON_SCRIPT_EOF
 # ================================================================
 # 功能 5：手动立即同步时间
 # ================================================================
-_manual_sync_time() {
-    clear
-    _time_header "立即手动同步时间"
+
+# ----------------------------------------------------------------
+# 内部辅助：执行单次 NTP 同步（指定服务器+端口，自动选择工具）
+# 参数: $1=NTP服务器IP/域名  $2=UDP端口(默认123)
+# 返回: 0=同步成功  1=失败
+# ----------------------------------------------------------------
+_do_ntp_sync_once() {
+    local target_host="${1:-127.0.0.1}"
+    local target_port="${2:-123}"
+    local synced=false
+
+    echo -e "  ${CYAN}⏳ 正在向 [${target_host}:${target_port}] 发起时间同步...${NC}"
     echo ""
 
-    # 检查是否已有同步脚本
-    if [ -f "$_NTP_SYNC_SCRIPT" ]; then
-        echo -e "${BLUE}检测到已配置同步脚本，正在执行...${NC}"
-        bash "$_NTP_SYNC_SCRIPT"
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}✓ 时间同步成功！当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')${NC}"
+    # ── 方式 1: ntpdate（最简单直接）──
+    if command -v ntpdate &>/dev/null; then
+        echo -ne "  ${BLUE}▶ 方式1 ntpdate -u -t 8 ${target_host}...${NC}  "
+        local ntpdate_out
+        if [ "$target_port" = "123" ]; then
+            ntpdate_out=$(ntpdate -u -t 8 "$target_host" 2>&1)
         else
-            echo -e "${RED}✗ 同步脚本执行失败，尝试直接使用 ntpdate...${NC}"
+            # ntpdate 不支持自定义端口，跳过
+            echo -e "${YELLOW}⚠ ntpdate 不支持非 123 端口，跳过${NC}"
+            ntpdate_out=""
         fi
-    else
-        echo -e "${YELLOW}未找到同步脚本，尝试直接同步...${NC}"
-    fi
-
-    # 直接尝试同步（无论脚本是否存在）
-    local synced=false
-    local servers=("127.0.0.1" "ntp.aliyun.com" "ntp.tencent.com" "cn.ntp.org.cn")
-
-    for srv in "${servers[@]}"; do
-        echo -ne "  ${CYAN}尝试 ${srv}...${NC} "
-        if command -v ntpdate &>/dev/null; then
-            if ntpdate -u -t 5 "$srv" &>/dev/null; then
-                echo -e "${GREEN}✓ 同步成功${NC}"
-                synced=true
-                break
-            else
-                echo -e "${RED}✗ 超时/失败${NC}"
-            fi
-        elif command -v chronyc &>/dev/null; then
-            if chronyc makestep &>/dev/null; then
-                echo -e "${GREEN}✓ chronyc 同步成功${NC}"
-                synced=true
-                break
-            fi
-        elif command -v timedatectl &>/dev/null; then
-            timedatectl set-ntp true &>/dev/null
-            echo -e "${GREEN}✓ timedatectl NTP 已启用${NC}"
+        if [ -n "$ntpdate_out" ] && echo "$ntpdate_out" | grep -qiE "adjust|step|offset"; then
+            echo -e "${GREEN}✓ 同步成功${NC}"
+            echo -e "    ${CYAN}${ntpdate_out}${NC}"
             synced=true
-            break
-        else
-            echo -e "${YELLOW}⚠ 无可用的 NTP 同步工具${NC}"
-            break
+        elif [ "$target_port" = "123" ]; then
+            echo -e "${RED}✗ 失败: $(echo "$ntpdate_out" | head -1)${NC}"
         fi
-    done
-
-    if [ "$synced" = true ]; then
-        echo ""
-        echo -e "${GREEN}✓ 同步完成，写入硬件时钟...${NC}"
-        hwclock --systohc 2>/dev/null && echo -e "${GREEN}✓ 硬件时钟已更新${NC}" || \
-            echo -e "${YELLOW}⚠ hwclock 写入跳过（容器/虚拟机环境正常）${NC}"
-        echo -e "${CYAN}当前系统时间: $(date '+%Y-%m-%d %H:%M:%S %Z')${NC}"
     fi
+
+    # ── 方式 2: chronyd 单次查询模式（支持自定义端口，无需守护进程，可修正任意大偏差）──
+    if [ "$synced" = false ] && command -v chronyd &>/dev/null; then
+        echo -ne "  ${BLUE}▶ 方式2 chronyd -q 单次模式 [${target_host}:${target_port}]...${NC}  "
+        local chrony_srv_expr
+        if [ "$target_port" = "123" ]; then
+            chrony_srv_expr="server ${target_host} iburst"
+        else
+            chrony_srv_expr="server ${target_host} port ${target_port} iburst"
+        fi
+
+        # ── 关键: -q 模式需要独占 UDP 套接字，必须先停守护进程 ──
+        local _daemon_was_running=false
+        local _daemon_srv=""
+        for _s in chrony chronyd; do
+            if command -v systemctl &>/dev/null && systemctl is-active "$_s" &>/dev/null; then
+                _daemon_was_running=true
+                _daemon_srv="$_s"
+                systemctl stop "$_s" 2>/dev/null
+                pkill -9 chronyd 2>/dev/null || true
+                sleep 1
+                break
+            elif pgrep -x chronyd &>/dev/null; then
+                _daemon_was_running=true
+                pkill -9 chronyd 2>/dev/null || true
+                sleep 1
+                break
+            fi
+        done
+
+        local chrony_out
+        chrony_out=$(chronyd -q "$chrony_srv_expr" 2>&1)
+        local chrony_rc=$?
+
+        # ── 单次同步完成后，恢复守护进程 ──
+        if [ "$_daemon_was_running" = true ]; then
+            if [ -n "$_daemon_srv" ] && command -v systemctl &>/dev/null; then
+                systemctl start "$_daemon_srv" 2>/dev/null || chronyd 2>/dev/null || true
+            else
+                chronyd 2>/dev/null || true
+            fi
+        fi
+
+        if [ $chrony_rc -eq 0 ] || echo "$chrony_out" | grep -qiE "System clock|offset|stepped"; then
+            echo -e "${GREEN}✓ 同步成功${NC}"
+            echo "$chrony_out" | grep -iE "offset|clock|step" | head -3 | while IFS= read -r line; do
+                echo -e "    ${CYAN}│ ${line}${NC}"
+            done
+            synced=true
+        else
+            echo -e "${RED}✗ 失败: $(echo "$chrony_out" | tail -1)${NC}"
+        fi
+    fi
+
+    # ── 方式 3: chronyc makestep（仅适用已配置守护进程的情况）──
+    if [ "$synced" = false ] && command -v chronyc &>/dev/null; then
+        echo -ne "  ${BLUE}▶ 方式3 chronyc makestep（触发守护进程步进）...${NC}  "
+        local step_out
+        step_out=$(chronyc makestep 2>&1)
+        if echo "$step_out" | grep -qiE "200 OK|Clock was stepped|done"; then
+            echo -e "${GREEN}✓ 步进触发成功${NC}"
+            synced=true
+        else
+            echo -e "${YELLOW}⚠ 跳过: $(echo "$step_out" | head -1)${NC}"
+        fi
+    fi
+
+    # ── 方式 4: timedatectl（开启系统 NTP，不指定特定服务器）──
+    if [ "$synced" = false ] && command -v timedatectl &>/dev/null && [ "$target_host" = "127.0.0.1" ]; then
+        echo -ne "  ${BLUE}▶ 方式4 timedatectl set-ntp true...${NC}  "
+        timedatectl set-ntp true &>/dev/null
+        echo -e "${GREEN}✓ 系统 NTP 已启用${NC}"
+        synced=true
+    fi
+
+    echo ""
+    if [ "$synced" = true ]; then
+        # 写回硬件时钟
+        echo -ne "  ${CYAN}➜ 写回硬件时钟 (hwclock --systohc)...${NC}  "
+        hwclock --systohc 2>/dev/null \
+            && echo -e "${GREEN}✓ 已更新${NC}" \
+            || echo -e "${YELLOW}⚠ 跳过（虚拟化/容器环境正常）${NC}"
+        echo ""
+        echo -e "  ${GREEN}✅ 同步完成！当前系统时间: ${CYAN}$(date '+%Y-%m-%d %H:%M:%S %Z')${NC}"
+        return 0
+    else
+        echo -e "  ${RED}✗ 所有同步方式均失败，请检查网络/工具/服务状态。${NC}"
+        return 1
+    fi
+}
+
+# ----------------------------------------------------------------
+# 选项 1: 手动指定 NTP 服务器进行同步
+# ----------------------------------------------------------------
+_sync_manual_ntp_server() {
+    clear
+    _time_header "立即手动同步 ▸ 指定 NTP 服务器"
+    echo ""
+
+    echo -e "${BLUE}请输入目标 NTP 服务器地址（支持 IP 或域名，可含端口）${NC}"
+    echo -e "  示例: ${CYAN}ntp.aliyun.com${NC}   ${CYAN}192.168.1.100${NC}   ${CYAN}192.168.1.100:1123${NC}"
+    echo -e "  常用公网服务器:"
+    echo -e "    ${CYAN}ntp.aliyun.com${NC}    (阿里云，国内推荐 ★)"
+    echo -e "    ${CYAN}ntp.tencent.com${NC}   (腾讯云)"
+    echo -e "    ${CYAN}cn.ntp.org.cn${NC}     (中国 NTP 池)"
+    echo -e "    ${CYAN}pool.ntp.org${NC}      (全球 NTP 池)"
+    echo ""
+    read -p "  请输入 NTP 服务器 [直接回车=ntp.aliyun.com]: " user_input < /dev/tty
+    user_input="${user_input:-ntp.aliyun.com}"
+
+    # 解析 host:port
+    local sync_host sync_port
+    user_input=$(echo "$user_input" | tr -d ' ')
+    if [[ "$user_input" == *":"* ]]; then
+        sync_host="${user_input%%:*}"
+        sync_port="${user_input##*:}"
+    else
+        sync_host="$user_input"
+        sync_port="123"
+    fi
+
+    # 端口合法性检查
+    if ! [[ "$sync_port" =~ ^[0-9]+$ ]] || [ "$sync_port" -lt 1 ] || [ "$sync_port" -gt 65535 ]; then
+        echo -e "  ${YELLOW}⚠ 端口无效，已重置为 123${NC}"
+        sync_port="123"
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}✓ 目标服务器: ${CYAN}${sync_host}:${sync_port}${NC}"
+    echo ""
+
+    # 检查工具可用性
+    local has_tool=false
+    command -v ntpdate &>/dev/null && has_tool=true
+    command -v chronyd  &>/dev/null && has_tool=true
+    command -v chronyc  &>/dev/null && has_tool=true
+    if [ "$has_tool" = false ]; then
+        echo -e "  ${RED}✗ 未检测到任何 NTP 客户端工具 (ntpdate / chronyd / chronyc)${NC}"
+        echo -e "  ${YELLOW}  请先进入菜单 [8] 安装 NTP 工具后再重试。${NC}"
+        echo ""
+        read -p "  按回车键返回..." -r < /dev/tty
+        return 1
+    fi
+
+    _do_ntp_sync_once "$sync_host" "$sync_port"
+    echo ""
+    read -p "  按回车键返回..." -r < /dev/tty
+}
+
+# ----------------------------------------------------------------
+# 选项 2: 与本机已部署的 Docker NTP 服务器进行同步
+# ----------------------------------------------------------------
+_sync_with_docker_ntp() {
+    clear
+    _time_header "立即手动同步 ▸ 与 Docker NTP 服务器同步"
+    echo ""
+
+    # --- 2.1 检查 Docker 可用性 ---
+    echo -e "${BLUE}[1/3] 检查 Docker 环境与 NTP 容器状态...${NC}"
+    if ! command -v docker &>/dev/null; then
+        echo -e "  ${RED}✗ Docker 未安装！${NC}"
+        echo -e "  ${YELLOW}请先在 [主菜单 → Docker 管理中心] 安装 Docker 后重试。${NC}"
+        echo ""
+        read -p "  按回车键返回..." -r < /dev/tty
+        return 1
+    fi
+
+    if ! docker info &>/dev/null; then
+        echo -e "  ${YELLOW}⚠ Docker 守护进程未运行，尝试启动...${NC}"
+        systemctl start docker 2>/dev/null
+        sleep 2
+        if ! docker info &>/dev/null; then
+            echo -e "  ${RED}✗ Docker 启动失败，请手动检查。${NC}"
+            echo ""
+            read -p "  按回车键返回..." -r < /dev/tty
+            return 1
+        fi
+    fi
+
+    # --- 2.2 探测 NTP 容器与映射端口 ---
+    local container_status
+    container_status=$(docker inspect --format='{{.State.Status}}' "$_NTP_CONTAINER_NAME" 2>/dev/null)
+
+    if [ -z "$container_status" ]; then
+        echo -e "  ${RED}✗ 未找到 NTP 容器 [${_NTP_CONTAINER_NAME}]！${NC}"
+        echo -e "  ${YELLOW}请先进入菜单 [1] 部署 Docker NTP 服务器后再使用此功能。${NC}"
+        echo ""
+        read -p "  按回车键返回..." -r < /dev/tty
+        return 1
+    fi
+
+    if [ "$container_status" != "running" ]; then
+        echo -e "  ${RED}✗ NTP 容器状态为 [${container_status}]，未在运行！${NC}"
+        echo -e "  ${YELLOW}请检查容器状态: docker ps -a | grep ${_NTP_CONTAINER_NAME}${NC}"
+        echo -e "  ${YELLOW}或使用菜单 [1] 重新部署。${NC}"
+        echo ""
+        read -p "  按回车键返回..." -r < /dev/tty
+        return 1
+    fi
+
+    # 解析宿主机映射端口（UDP 123 内部端口对应的宿主机端口）
+    local host_port
+    host_port=$(docker inspect --format='{{range $p, $b := .NetworkSettings.Ports}}{{if $b}}{{(index $b 0).HostPort}}{{end}}{{end}}' \
+        "$_NTP_CONTAINER_NAME" 2>/dev/null | tr -s ' \n' '\n' | head -1)
+
+    # 备用解析方式
+    if [ -z "$host_port" ]; then
+        host_port=$(docker port "$_NTP_CONTAINER_NAME" 123/udp 2>/dev/null | awk -F: '{print $2}' | head -1)
+    fi
+
+    # 若仍为空，默认 123
+    host_port="${host_port:-123}"
+
+    # 获取容器镜像与启动时间
+    local c_image c_start
+    c_image=$(docker inspect --format='{{.Config.Image}}' "$_NTP_CONTAINER_NAME" 2>/dev/null)
+    c_start=$(docker inspect --format='{{.State.StartedAt}}' "$_NTP_CONTAINER_NAME" 2>/dev/null | cut -c1-19 | tr 'T' ' ')
+
+    echo -e "  ${GREEN}✓ NTP 容器 [${_NTP_CONTAINER_NAME}] 运行正常${NC}"
+    echo -e "  ${CYAN}  镜像      : ${c_image}${NC}"
+    echo -e "  ${CYAN}  启动时间  : ${c_start} UTC${NC}"
+    echo -e "  ${CYAN}  宿主机端口: UDP ${host_port} → 容器内 UDP 123${NC}"
+    echo ""
+
+    # --- 2.3 先做 NTP 协议连通探测 ---
+    echo -e "${BLUE}[2/3] 验证 Docker NTP 服务可达性（NTP 协议探测）...${NC}"
+    if _bash_ntp_probe "127.0.0.1" "$host_port" 3; then
+        echo -e "  ${GREEN}✓ NTP 协议探测成功！服务已就绪，可以同步。${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ NTP 协议探测超时（容器可能仍在初始化，约 30 秒收敛）${NC}"
+        echo -e "  ${YELLOW}  建议等待后重试，或先在菜单 [4] 执行健康检测。${NC}"
+        echo ""
+        read -p "  是否仍然强制尝试同步? [y/N]: " force_sync < /dev/tty
+        if [[ ! "$force_sync" =~ ^[Yy]$ ]]; then
+            echo -e "  ${BLUE}已取消。${NC}"
+            echo ""
+            read -p "  按回车键返回..." -r < /dev/tty
+            return 1
+        fi
+    fi
+    echo ""
+
+    # --- 2.4 执行同步 ---
+    echo -e "${BLUE}[3/3] 执行时间同步...${NC}"
+
+    # 检查工具可用性
+    local has_tool=false
+    command -v ntpdate &>/dev/null && has_tool=true
+    command -v chronyd  &>/dev/null && has_tool=true
+    command -v chronyc  &>/dev/null && has_tool=true
+
+    if [ "$has_tool" = false ]; then
+        echo -e "  ${RED}✗ 未检测到任何 NTP 客户端工具 (ntpdate / chronyd / chronyc)${NC}"
+        echo -e "  ${YELLOW}  请先进入菜单 [8] 安装 NTP 工具后再重试。${NC}"
+        echo ""
+        read -p "  按回车键返回..." -r < /dev/tty
+        return 1
+    fi
+
+    _do_ntp_sync_once "127.0.0.1" "$host_port"
+
+    # 显示容器最新日志（同步后参考）
+    echo ""
+    echo -e "  ${BLUE}📋 Docker NTP 容器近期日志 (最新 5 条):${NC}"
+    docker logs --tail 5 "$_NTP_CONTAINER_NAME" 2>&1 | while IFS= read -r line; do
+        echo -e "    ${CYAN}│${NC} $line"
+    done
 
     echo ""
     read -p "  按回车键返回..." -r < /dev/tty
+}
+
+# ----------------------------------------------------------------
+# 主函数: 手动同步时间 — 子菜单入口
+# ----------------------------------------------------------------
+_manual_sync_time() {
+    clear
+    _time_header "立即手动同步系统时间"
+    echo ""
+
+    echo -e "${BLUE}请选择同步方式:${NC}"
+    echo ""
+    echo -e "  ${GREEN}1.${NC} 指定 NTP 服务器同步"
+    echo -e "     ${BLUE}│${NC} 手动输入任意 NTP 服务器地址（支持 IP/域名/自定义端口）"
+    echo -e "     ${BLUE}│${NC} 适用场景: 公网同步、局域网指定服务器同步"
+    echo ""
+    echo -e "  ${CYAN}2.${NC} 与本机 Docker NTP 服务器同步"
+    echo -e "     ${BLUE}│${NC} 自动探测已部署的 [${_NTP_CONTAINER_NAME}] 容器端口"
+    echo -e "     ${BLUE}│${NC} 适用场景: 本机已运行 Docker NTP 容器（菜单 [1] 已部署）"
+    echo ""
+    echo -e "  ${YELLOW}3.${NC} 自动同步（快速模式）"
+    echo -e "     ${BLUE}│${NC} 自动按顺序尝试已配置脚本 → 公网 NTP 源"
+    echo ""
+    echo -e "  0. 返回"
+    echo ""
+    read -p "  请选择 [0-3，直接回车=1]: " sync_choice < /dev/tty
+    sync_choice="${sync_choice:-1}"
+
+    case "$sync_choice" in
+        1)
+            _sync_manual_ntp_server
+            ;;
+        2)
+            _sync_with_docker_ntp
+            ;;
+        3)
+            # ── 原有自动快速同步逻辑 ──
+            clear
+            _time_header "立即手动同步系统时间 ▸ 自动模式"
+            echo ""
+
+            # 检查是否已有同步脚本
+            if [ -f "$_NTP_SYNC_SCRIPT" ]; then
+                echo -e "${BLUE}检测到已配置同步脚本，正在执行...${NC}"
+                bash "$_NTP_SYNC_SCRIPT"
+                if [ $? -eq 0 ]; then
+                    echo -e "${GREEN}✓ 时间同步成功！当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')${NC}"
+                else
+                    echo -e "${YELLOW}⚠ 同步脚本执行失败，继续尝试直接同步...${NC}"
+                fi
+            else
+                echo -e "${YELLOW}未找到已配置的同步脚本，直接尝试公网 NTP 源...${NC}"
+            fi
+
+            echo ""
+            local synced=false
+            local servers=("ntp.aliyun.com" "ntp.tencent.com" "cn.ntp.org.cn" "pool.ntp.org")
+
+            for srv in "${servers[@]}"; do
+                echo -ne "  ${CYAN}尝试 ${srv}...${NC}  "
+                if command -v ntpdate &>/dev/null; then
+                    if ntpdate -u -t 5 "$srv" &>/dev/null; then
+                        echo -e "${GREEN}✓ 同步成功${NC}"
+                        synced=true
+                        break
+                    else
+                        echo -e "${RED}✗ 超时/失败${NC}"
+                    fi
+                elif command -v chronyc &>/dev/null; then
+                    if chronyc makestep &>/dev/null; then
+                        echo -e "${GREEN}✓ chronyc 同步成功${NC}"
+                        synced=true
+                        break
+                    else
+                        echo -e "${YELLOW}⚠ 跳过${NC}"
+                        break
+                    fi
+                elif command -v timedatectl &>/dev/null; then
+                    timedatectl set-ntp true &>/dev/null
+                    echo -e "${GREEN}✓ timedatectl NTP 已启用${NC}"
+                    synced=true
+                    break
+                else
+                    echo -e "${YELLOW}⚠ 无可用的 NTP 同步工具${NC}"
+                    break
+                fi
+            done
+
+            if [ "$synced" = true ]; then
+                echo ""
+                echo -ne "  ${CYAN}➜ 写回硬件时钟...${NC}  "
+                hwclock --systohc 2>/dev/null \
+                    && echo -e "${GREEN}✓ 硬件时钟已更新${NC}" \
+                    || echo -e "${YELLOW}⚠ hwclock 写入跳过（容器/虚拟机环境正常）${NC}"
+                echo -e "  ${CYAN}当前系统时间: $(date '+%Y-%m-%d %H:%M:%S %Z')${NC}"
+            else
+                echo ""
+                echo -e "  ${RED}✗ 所有 NTP 服务器同步失败。${NC}"
+                echo -e "  ${YELLOW}  提示: 可选择菜单选项 [1] 手动指定内网 NTP 服务器，或 [8] 安装同步工具。${NC}"
+            fi
+
+            echo ""
+            read -p "  按回车键返回..." -r < /dev/tty
+            ;;
+        0)
+            return
+            ;;
+        *)
+            echo -e "${RED}输入无效。${NC}"
+            sleep 1
+            ;;
+    esac
 }
 
 # ================================================================
