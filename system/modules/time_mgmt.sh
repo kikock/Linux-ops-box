@@ -396,34 +396,37 @@ _check_hwclock() {
 }
 
 # ================================================================
-# 辅助：一键生成纯内网/离线孤岛模式 ntpd.conf 配置文件
+# 辅助：一键生成纯内网/离线孤岛模式 chrony.conf 配置文件
+# 注意: cturra/ntp 容器内部运行的是 chronyd，必须使用 chrony 格式
+#       不能使用 ntpd 的 server 127.127.1.0 + fudge 语法
 # ================================================================
 _generate_ntp_offline_conf() {
     local target_dir="${1:-/etc/ntp-docker}"
-    local target_file="${target_dir}/ntpd.conf"
+    # 使用 chrony.conf 格式，对应容器内 chronyd 的配置
+    local target_file="${target_dir}/chrony.conf"
 
-    echo -ne "  ${CYAN}➜ 正在一键生成离线孤岛配置文件 [${target_file}]...${NC} "
+    echo -ne "  ${CYAN}➜ 正在生成离线孤岛 chrony.conf [${target_file}]...${NC} "
     mkdir -p "$target_dir" 2>/dev/null
     cat > "$target_file" << 'NTP_CONF_EOF'
-# ntpd.conf - 纯内网/离线孤岛模式配置文件
+# chrony.conf - 纯内网/离线孤岛模式配置文件（chronyd 格式）
 # 由 Linux-ops-box 自动生成
+# 适配容器: cturra/ntp (内部使用 chronyd)
 
-# 127.127.1.0 本地系统时钟驱动 (LOCAL Clock)
-# fudge 声明自身为 Stratum 10（确保断网孤岛时允许对局域网客户端授时）
-server 127.127.1.0
-fudge  127.127.1.0 stratum 10
+# ============================================================
+# 关键配置: 以本机系统时钟作为独立时源（孤岛授时模式）
+# local stratum 10: 宣告自身 stratum=10，允许内网客户端同步
+# orphan: 支持多节点孤岛互选（可选，兼容性强）
+# ============================================================
+local stratum 10 orphan
 
-# 访问控制权限
-restrict default kod nomodify notrap nopeer
-restrict 127.0.0.1
-restrict -6 ::1
+# 允许全部内网客户端访问（包括所有私有地址段）
+allow all
 
-# 允许私有局域网所有私网段进行时间查询校准
-restrict 10.0.0.0    mask 255.0.0.0 nomodify notrap
-restrict 172.16.0.0  mask 255.240.0.0 nomodify notrap
-restrict 192.168.0.0 mask 255.255.0.0 nomodify notrap
+# driftfile: 记录时钟频率漂移，容器重启后更快收敛
+driftfile /var/lib/chrony/chrony.drift
 
-driftfile /var/lib/ntp/ntp.drift
+# 日志路径
+logdir /var/log/chrony
 NTP_CONF_EOF
 
     if [ -f "$target_file" ] && [ -s "$target_file" ]; then
@@ -542,20 +545,48 @@ _setup_ntp_docker() {
     local ntp_upstream=""
     local offline_mode=false
     local ntp_conf_dir="/etc/ntp-docker"
-    local ntp_conf_file="${ntp_conf_dir}/ntpd.conf"
+    # chrony.conf: cturra/ntp 容器内部使用 chronyd，挂载到 /etc/chrony/chrony.conf
+    local ntp_conf_file="${ntp_conf_dir}/chrony.conf"
 
     case "$ntp_mode_choice" in
         2)
             offline_mode=true
             echo ""
-            echo -e "  ${CYAN}⏰ [离线孤岛模式] 正在检查本机硬件时钟 (RTC)...${NC}"
+            echo -e "  ${CYAN}⏰ [离线孤岛模式] 正在检查本机时钟状态...${NC}"
+            echo -e "  ${BLUE}  时钟继承链: RTC(硬件时钟) → 宿主机系统时钟 → 容器chronyd → 客户端${NC}"
+            echo ""
+
+            local sys_ts hw_ts hw_now sys_now
+            sys_now=$(date '+%Y-%m-%d %H:%M:%S %Z')
+            sys_ts=$(date +%s)
+            echo -e "  ${CYAN}  系统时钟 : ${sys_now}${NC}"
+
             if hwclock --show &>/dev/null 2>&1; then
-                local hw_now
                 hw_now=$(hwclock --show 2>/dev/null)
-                echo -e "  ${GREEN}✓ 硬件时钟(RTC)可用: ${hw_now}${NC}"
+                echo -e "  ${GREEN}  硬件时钟 : ${hw_now}${NC}"
+                # 计算 RTC 与系统时钟偏差
+                hw_ts=$(hwclock --show 2>/dev/null | awk '{print $1,$2}' | \
+                        xargs -I{} date -d "{}" +%s 2>/dev/null || echo "")
+                if [ -n "$hw_ts" ]; then
+                    local hw_diff=$(( sys_ts - hw_ts ))
+                    local hw_abs=${hw_diff#-}
+                    if [ "$hw_abs" -le 2 ]; then
+                        echo -e "  ${GREEN}  ✓ RTC 与系统时钟偏差: ${hw_diff}s — 一致，授时基准可靠${NC}"
+                    elif [ "$hw_abs" -le 60 ]; then
+                        echo -e "  ${YELLOW}  ⚠ RTC 与系统时钟偏差: ${hw_diff}s — 轻微漂移${NC}"
+                        echo -e "  ${YELLOW}    建议先执行 hwclock --hctosys 让系统时钟与 RTC 对齐${NC}"
+                    else
+                        echo -e "  ${RED}  ✗ RTC 与系统时钟偏差: ${hw_diff}s — 差异过大！${NC}"
+                        echo -e "  ${RED}    强烈建议先手动校准 RTC 后再部署 NTP 服务:${NC}"
+                        echo -e "  ${RED}    方法1: date -s 'YYYY-MM-DD HH:MM:SS' && hwclock --systohc${NC}"
+                        echo -e "  ${RED}    方法2: ntpdate -u ntp.aliyun.com && hwclock --systohc${NC}"
+                    fi
+                fi
             else
-                echo -e "  ${YELLOW}⚠ 无法直接读取硬件时钟（虚拟化环境），将以内核系统时钟作为基准${NC}"
+                echo -e "  ${YELLOW}  ⚠ 无法读取硬件时钟（虚拟化/容器环境）${NC}"
+                echo -e "  ${BLUE}    将直接以宿主机系统时钟为授时基准（chronyd local stratum 10）${NC}"
             fi
+            echo ""
             _generate_ntp_offline_conf "$ntp_conf_dir"
             echo ""
             ;;
@@ -637,12 +668,14 @@ _setup_ntp_docker() {
     echo ""
 
     if [ "$offline_mode" = true ]; then
+        # 挂载 chrony.conf 到容器内 chronyd 实际读取的路径 /etc/chrony/chrony.conf
+        # 原路径 /etc/ntpd.conf 为 ntpd 格式，chronyd 不会读取，导致 stratum 16 无法授时
         docker run -d \
             --name "$_NTP_CONTAINER_NAME" \
             --restart=always \
             --cap-add SYS_TIME \
             -p "${ntp_host_port}:123/udp" \
-            -v "${ntp_conf_file}:/etc/ntpd.conf:ro" \
+            -v "${ntp_conf_file}:/etc/chrony/chrony.conf:ro" \
             cturra/ntp:latest
     else
         docker run -d \
@@ -660,8 +693,9 @@ _setup_ntp_docker() {
         echo -e "  ${CYAN}  容器名称: ${_NTP_CONTAINER_NAME}${NC}"
         echo -e "  ${CYAN}  监听端口: 宿主机 UDP ${ntp_host_port} -> 容器内部 UDP 123${NC}"
         if [ "$offline_mode" = true ]; then
-            echo -e "  ${CYAN}  运行模式: 纯内网/离线孤岛模式 (自动挂载 ${ntp_conf_file})${NC}"
-            echo -e "  ${CYAN}  授时基准: 本机硬件时钟 (RTC/Local Clock 127.127.1.0 stratum 10)${NC}"
+            echo -e "  ${CYAN}  运行模式: 纯内网/离线孤岛模式 (chrony.conf: local stratum 10 orphan)${NC}"
+            echo -e "  ${CYAN}  授时基准: 宿主机系统时钟（=RTC硬件时钟，容器与宿主机共享内核时钟）${NC}"
+            echo -e "  ${CYAN}  对外宣告: Stratum 10（内网客户端可正常同步）${NC}"
         else
             echo -e "  ${CYAN}  上游服务: ${ntp_upstream}${NC}"
         fi
@@ -866,18 +900,93 @@ _check_ntp_health() {
         fi
         echo ""
 
-        # --- 3.4 当前系统时间与时区 ---
+        # --- 3.4 当前系统时间与时区（详细诊断） ---
         echo -e "${BLUE}[4/4] 当前系统时间状态...${NC}"
         echo -e "  ${CYAN}系统时间 : $(date '+%Y-%m-%d %H:%M:%S %Z')${NC}"
+
         if command -v timedatectl &>/dev/null; then
-            local sync_status
-            sync_status=$(timedatectl show --property=NTPSynchronized --value 2>/dev/null)
-            if [ "$sync_status" = "yes" ]; then
-                echo -e "  ${GREEN}✓ NTP 同步状态: 已同步${NC}"
+            local tz ntp_synced ntp_active timesyncd_server rtc_time
+            tz=$(timedatectl show --property=Timezone --value 2>/dev/null)
+            ntp_synced=$(timedatectl show --property=NTPSynchronized --value 2>/dev/null)
+            ntp_active=$(timedatectl show --property=NTP --value 2>/dev/null)
+            rtc_time=$(timedatectl show --property=RTCTimeUSec --value 2>/dev/null | \
+                       awk -F'=' '{print $1}' 2>/dev/null || true)
+            echo -e "  ${CYAN}时区       : ${tz}${NC}"
+
+            # ── NTPSynchronized 含义说明 ──────────────────────────────
+            # 该值由宿主机的 NTP 客户端守护进程（systemd-timesyncd/chronyd/ntpd）写入
+            # 与 Docker NTP 容器无关：容器是【对外授时服务器】，不负责同步本机时钟
+            # 若本机角色为纯 NTP 服务端，此处显示"未同步"属正常现象
+            # ──────────────────────────────────────────────────────────
+            if [ "$ntp_synced" = "yes" ]; then
+                echo -e "  ${GREEN}✓ NTP同步状态: 已同步 (宿主机系统时钟已被某 NTP 守护进程同步)${NC}"
             else
-                echo -e "  ${YELLOW}⚠ NTP 同步状态: 未同步 (timedatectl)${NC}"
+                # 判断本机 NTP 服务是否已开启（服务端角色 or 客户端未启动）
+                if [ "$ntp_active" = "yes" ]; then
+                    echo -e "  ${YELLOW}⚠ NTP同步状态: NTP已启用但尚未完成同步 (守护进程正在收敛中)${NC}"
+                else
+                    echo -e "  ${YELLOW}⚠ NTP同步状态: 未同步${NC}"
+                fi
+                echo -e "  ${BLUE}  ┌─ 说明: 此状态反映的是【宿主机本身】是否被 NTP 客户端守护进程同步${NC}"
+                echo -e "  ${BLUE}  │  与 Docker NTP 容器无关（容器是对外授时服务器，不同步本机）${NC}"
+                echo -e "  ${BLUE}  │  若本机定位为纯 NTP 服务端，显示"未同步"属正常现象${NC}"
+                echo -e "  ${BLUE}  └─ 若需同步宿主机时钟，可配置 chrony 客户端指向上游 NTP${NC}"
             fi
-            echo -e "  ${CYAN}时区     : $(timedatectl show --property=Timezone --value 2>/dev/null)${NC}"
+
+            # ── systemd-timesyncd 详情（若在运行）──────────────────
+            if systemctl is-active --quiet systemd-timesyncd 2>/dev/null; then
+                local tsd_server tsd_poll tsd_offset tsd_delay tsd_last
+                # timedatectl show-timesync 仅在较新版 systemd 可用
+                if timedatectl show-timesync &>/dev/null 2>&1; then
+                    tsd_server=$(timedatectl show-timesync --property=ServerName --value 2>/dev/null)
+                    tsd_poll=$(timedatectl show-timesync --property=Poll --value 2>/dev/null)
+                    tsd_offset=$(timedatectl show-timesync --property=NTPMessage --value 2>/dev/null | \
+                                 grep -oP 'offset=\K[^,]+' 2>/dev/null | head -1)
+                    tsd_delay=$(timedatectl show-timesync --property=NTPMessage --value 2>/dev/null | \
+                                grep -oP 'delay=\K[^,]+' 2>/dev/null | head -1)
+                    tsd_last=$(timedatectl show-timesync --property=ReferenceTime --value 2>/dev/null)
+                    echo -e "  ${CYAN}  ┌─ [systemd-timesyncd 详情]${NC}"
+                    [ -n "$tsd_server" ] && echo -e "  ${CYAN}  │  同步服务器 : ${tsd_server}${NC}"
+                    [ -n "$tsd_poll" ]   && echo -e "  ${CYAN}  │  轮询间隔   : ${tsd_poll}s${NC}"
+                    [ -n "$tsd_offset" ] && echo -e "  ${CYAN}  │  时钟偏移   : ${tsd_offset}ms${NC}"
+                    [ -n "$tsd_delay" ]  && echo -e "  ${CYAN}  │  网络延迟   : ${tsd_delay}ms${NC}"
+                    [ -n "$tsd_last" ]   && echo -e "  ${CYAN}  └─ 最后同步   : ${tsd_last}${NC}"
+                else
+                    # 旧版 systemd 用 journalctl 获取最近同步记录
+                    local last_sync_log
+                    last_sync_log=$(journalctl -u systemd-timesyncd --no-pager -n 5 \
+                                    --output=short-iso 2>/dev/null | \
+                                    grep -E 'Synchronized|synchronized|Syncing|offset' | tail -2)
+                    if [ -n "$last_sync_log" ]; then
+                        echo -e "  ${CYAN}  ┌─ [systemd-timesyncd 最近同步日志]${NC}"
+                        echo "$last_sync_log" | while IFS= read -r line; do
+                            echo -e "  ${CYAN}  │  $line${NC}"
+                        done
+                        echo -e "  ${CYAN}  └─${NC}"
+                    fi
+                fi
+            fi
+
+            # ── chrony 客户端详情（若在运行）──────────────────────
+            if command -v chronyc &>/dev/null && \
+               systemctl is-active --quiet chronyd 2>/dev/null || \
+               systemctl is-active --quiet chrony 2>/dev/null; then
+                local cr_ref cr_offset cr_rms cr_freq cr_last
+                cr_ref=$(chronyc tracking 2>/dev/null | awk -F': ' '/Reference ID/{print $2}')
+                cr_offset=$(chronyc tracking 2>/dev/null | awk -F': ' '/System time/{print $2}')
+                cr_rms=$(chronyc tracking 2>/dev/null | awk -F': ' '/RMS offset/{print $2}')
+                cr_freq=$(chronyc tracking 2>/dev/null | awk -F': ' '/Frequency/{print $2}')
+                cr_last=$(chronyc tracking 2>/dev/null | awk -F': ' '/Last offset/{print $2}')
+                if [ -n "$cr_ref" ]; then
+                    echo -e "  ${GREEN}  ┌─ [chrony 客户端同步详情]${NC}"
+                    echo -e "  ${GREEN}  │  上游时间源  : ${cr_ref}${NC}"
+                    [ -n "$cr_offset" ] && echo -e "  ${GREEN}  │  系统时钟偏移: ${cr_offset}${NC}"
+                    [ -n "$cr_rms" ]    && echo -e "  ${GREEN}  │  RMS 偏移    : ${cr_rms}${NC}"
+                    [ -n "$cr_freq" ]   && echo -e "  ${GREEN}  │  频率误差    : ${cr_freq}${NC}"
+                    [ -n "$cr_last" ]   && echo -e "  ${GREEN}  │  最近偏移    : ${cr_last}${NC}"
+                    echo -e "  ${GREEN}  └─${NC}"
+                fi
+            fi
         fi
 
     else
@@ -972,11 +1081,51 @@ _check_ntp_health() {
     echo ""
 
     # --- 汇总状态 ---
+    # 检测是否为 stratum 16 场景（ntpdate 有响应但拒绝同步）
+    local stratum16_detected=false
+    if [ "$udp_ok" = true ] && [ "$ntp_proto_ok" = false ]; then
+        # 如果容器运行正常但 NTP 协议拒绝授时，大概率是 stratum 16 问题
+        if docker inspect --format='{{.State.Status}}' "$_NTP_CONTAINER_NAME" 2>/dev/null | grep -q 'running'; then
+            local recent_log
+            recent_log=$(docker logs --tail 10 "$_NTP_CONTAINER_NAME" 2>&1)
+            if echo "$recent_log" | grep -qi 'stratum 16\|no servers\|driftfile\|Can.t synchronise'; then
+                stratum16_detected=true
+            fi
+        fi
+    fi
+
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     if [ "$overall_ok" = true ] && [ "$ntp_proto_ok" = true ]; then
         echo -e " ${GREEN}🟢 总体状态: NTP 服务器 [${ntp_target}:${ntp_port}] 响应健康、通信正常！${NC}"
+    elif [ "$stratum16_detected" = true ]; then
+        echo -e " ${YELLOW}🟡 总体状态: NTP 服务器 [${ntp_target}:${ntp_port}] 响应健康、通信正常！${NC}  ${RED}NTP 服务器认为自己的时钟不可信，拒绝给客户端做时间同步${NC}"
+        echo ""
+        echo -e " ${RED}┌─── 🔴 Stratum 16 故障诊断 ─────────────────────────────────────────┐${NC}"
+        echo -e " ${RED}│${NC} ${YELLOW}根因:${NC} 容器内 chronyd 无法连接公网 NTP 上游，时钟标记为不可信"
+        echo -e " ${RED}│${NC} ${YELLOW}影响:${NC} 内网其他服务器无法从本机同步时间（RFC 5905 协议强制拒绝）"
+        echo -e " ${RED}│${NC}"
+        echo -e " ${RED}│${NC} ${GREEN}修复方案（内网/离线孤岛环境）:${NC}"
+        echo -e " ${RED}│${NC}   ${CYAN}步骤1:${NC} 删除现有容器"
+        echo -e " ${RED}│${NC}   ${CYAN}  docker rm -f ${_NTP_CONTAINER_NAME}${NC}"
+        echo -e " ${RED}│${NC}   ${CYAN}步骤2:${NC} 生成正确的 chrony.conf 离线配置"
+        echo -e " ${RED}│${NC}   ${CYAN}  mkdir -p /etc/ntp-docker${NC}"
+        echo -e " ${RED}│${NC}   ${CYAN}  cat > /etc/ntp-docker/chrony.conf << 'EOF'${NC}"
+        echo -e " ${RED}│${NC}   ${CYAN}  local stratum 10 orphan${NC}"
+        echo -e " ${RED}│${NC}   ${CYAN}  allow all${NC}"
+        echo -e " ${RED}│${NC}   ${CYAN}  driftfile /var/lib/chrony/chrony.drift${NC}"
+        echo -e " ${RED}│${NC}   ${CYAN}  logdir /var/log/chrony${NC}"
+        echo -e " ${RED}│${NC}   ${CYAN}  EOF${NC}"
+        echo -e " ${RED}│${NC}   ${CYAN}步骤3:${NC} 重新启动容器（挂载 chrony.conf）"
+        echo -e " ${RED}│${NC}   ${CYAN}  docker run -d --name ${_NTP_CONTAINER_NAME} --restart=always \\${NC}"
+        echo -e " ${RED}│${NC}   ${CYAN}    --cap-add SYS_TIME -p 123:123/udp \\${NC}"
+        echo -e " ${RED}│${NC}   ${CYAN}    -v /etc/ntp-docker/chrony.conf:/etc/chrony/chrony.conf:ro \\${NC}"
+        echo -e " ${RED}│${NC}   ${CYAN}    cturra/ntp:latest${NC}"
+        echo -e " ${RED}│${NC}"
+        echo -e " ${RED}│${NC}   ${YELLOW}💡 或使用本脚本菜单: [7]停止容器 → [2]重新部署 → 选择模式2(离线孤岛)${NC}"
+        echo -e " ${RED}└─────────────────────────────────────────────────────────────────────┘${NC}"
     elif [ "$udp_ok" = true ] && [ "$ntp_proto_ok" = false ]; then
         echo -e " ${YELLOW}🟡 总体状态: 网络通道可通，但 NTP 协议层未正常响应（可能正在收敛或被拦截）${NC}"
+        echo -e "   ${BLUE}提示: 若容器刚启动，请等待 60 秒后重新检测；若持续出现请检查上游 NTP 连通性${NC}"
     else
         echo -e " ${RED}🔴 总体状态: NTP 探测失败，目标服务器无法连通${NC}"
     fi
