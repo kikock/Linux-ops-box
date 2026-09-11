@@ -2045,67 +2045,219 @@ _manual_sync_time() {
 }
 
 # ================================================================
-# 功能 6：停止并清理 NTP 服务
+# 功能 6：停止并清理 NTP 服务（Docker NTP 服务器 / Chrony 客户端）
 # ================================================================
 _remove_ntp_setup() {
     clear
     _time_header "停止并清理 NTP 服务"
     echo ""
 
-    echo -e "${YELLOW}将执行以下清理操作:${NC}"
-    echo -e "  1. 停止并删除 Docker NTP 容器 [${_NTP_CONTAINER_NAME}]"
-    echo -e "  2. 禁用并删除 Systemd ntp-sync 服务"
-    echo -e "  3. 删除同步脚本 ${_NTP_SYNC_SCRIPT}"
+    echo -e "${YELLOW}请选择清理范围:${NC}"
+    echo -e "  1. ${CYAN}仅清理 Docker NTP 服务器${NC}（容器 + 离线配置 + ntp-sync 自启）"
+    echo -e "  2. ${CYAN}仅卸载 Chrony 客户端${NC}（停止服务 + 禁自启 + 删配置 + 可选卸包）"
+    echo -e "  3. ${RED}全部清理${NC}（Docker NTP 服务器 + Chrony 客户端 全部移除）"
+    echo -e "  0. 取消返回"
     echo ""
-    read -p "  是否确认执行清理? [y/N]: " confirm_rm < /dev/tty
-    if [[ ! "$confirm_rm" =~ ^[Yy]$ ]]; then
-        echo -e "${BLUE}已取消。${NC}"
-        sleep 1
-        return
-    fi
-
+    read -p "  请选择 [0-3]: " rm_scope < /dev/tty
+    [ "$rm_scope" = "0" ] && return
     echo ""
 
-    # 停止 Docker 容器
-    if command -v docker &>/dev/null; then
-        if docker inspect "$_NTP_CONTAINER_NAME" &>/dev/null; then
-            echo -ne "  ${CYAN}停止 Docker NTP 容器...${NC} "
-            docker stop "$_NTP_CONTAINER_NAME" &>/dev/null
-            docker rm "$_NTP_CONTAINER_NAME" &>/dev/null
+    # ================================================================
+    # 子流程 A：清理 Docker NTP 服务器端
+    # ================================================================
+    _do_remove_docker_ntp() {
+        echo -e "${BLUE}── 清理 Docker NTP 服务器 ─────────────────────────────${NC}"
+
+        if command -v docker &>/dev/null; then
+            if docker inspect "$_NTP_CONTAINER_NAME" &>/dev/null; then
+                echo -ne "  ${CYAN}停止并删除 NTP 容器 [${_NTP_CONTAINER_NAME}]...${NC} "
+                docker stop "$_NTP_CONTAINER_NAME" &>/dev/null
+                docker rm   "$_NTP_CONTAINER_NAME" &>/dev/null
+                echo -e "${GREEN}✓ 已删除${NC}"
+            else
+                echo -e "  ${BLUE}  Docker NTP 容器不存在，跳过${NC}"
+            fi
+        else
+            echo -e "  ${BLUE}  Docker 未安装，跳过容器清理${NC}"
+        fi
+
+        local offline_conf="/etc/ntp-docker/chrony.conf"
+        if [ -f "$offline_conf" ]; then
+            echo -ne "  ${CYAN}删除离线孤岛配置 [${offline_conf}]...${NC} "
+            rm -f "$offline_conf"
+            rmdir /etc/ntp-docker 2>/dev/null || true
             echo -e "${GREEN}✓ 已删除${NC}"
         else
-            echo -e "  ${BLUE}  Docker NTP 容器不存在，跳过${NC}"
+            echo -e "  ${BLUE}  离线孤岛配置不存在，跳过${NC}"
         fi
-    fi
 
-    # 停止 Systemd 服务
-    if command -v systemctl &>/dev/null; then
-        if systemctl list-unit-files ntp-sync.service &>/dev/null 2>&1 | grep -q ntp-sync; then
-            echo -ne "  ${CYAN}禁用 ntp-sync.service...${NC} "
-            systemctl stop ntp-sync.service &>/dev/null
-            systemctl disable ntp-sync.service &>/dev/null
-            rm -f "$_NTP_SERVICE_FILE"
-            systemctl daemon-reload
-            echo -e "${GREEN}✓ 已清除${NC}"
+        if command -v systemctl &>/dev/null; then
+            if systemctl list-unit-files ntp-sync.service &>/dev/null 2>&1 | grep -q ntp-sync; then
+                echo -ne "  ${CYAN}禁用 ntp-sync.service...${NC} "
+                systemctl stop    ntp-sync.service &>/dev/null
+                systemctl disable ntp-sync.service &>/dev/null
+                rm -f "$_NTP_SERVICE_FILE"
+                systemctl daemon-reload &>/dev/null
+                echo -e "${GREEN}✓ 已清除${NC}"
+            else
+                echo -e "  ${BLUE}  ntp-sync.service 不存在，跳过${NC}"
+            fi
+        fi
+
+        if [ -f "$_NTP_SYNC_SCRIPT" ]; then
+            echo -ne "  ${CYAN}删除同步脚本 [${_NTP_SYNC_SCRIPT}]...${NC} "
+            rm -f "$_NTP_SYNC_SCRIPT"
+            echo -e "${GREEN}✓ 已删除${NC}"
         else
-            echo -e "  ${BLUE}  ntp-sync.service 不存在，跳过${NC}"
+            echo -e "  ${BLUE}  同步脚本不存在，跳过${NC}"
         fi
-    fi
 
-    # 删除同步脚本
-    if [ -f "$_NTP_SYNC_SCRIPT" ]; then
-        echo -ne "  ${CYAN}删除同步脚本...${NC} "
-        rm -f "$_NTP_SYNC_SCRIPT"
-        echo -e "${GREEN}✓ 已删除${NC}"
-    else
-        echo -e "  ${BLUE}  同步脚本不存在，跳过${NC}"
-    fi
+        echo -e "  ${GREEN}✅ Docker NTP 服务器清理完成${NC}"
+        echo ""
+    }
 
-    echo ""
-    echo -e "${GREEN}✅ NTP 服务清理完成。${NC}"
+    # ================================================================
+    # 子流程 B：卸载 Chrony 客户端
+    # ================================================================
+    _do_remove_chrony_client() {
+        echo -e "${BLUE}── 卸载 Chrony 客户端 ──────────────────────────────────${NC}"
+        local found_chrony=false
+
+        # 1. 停止并禁用 chrony/chronyd systemd 服务
+        if command -v systemctl &>/dev/null; then
+            for svc in chrony chronyd; do
+                local st en
+                st=$(systemctl is-active  "$svc" 2>/dev/null)
+                en=$(systemctl is-enabled "$svc" 2>/dev/null)
+                if [ "$st" = "active" ] || [ "$en" = "enabled" ] || \
+                   systemctl cat "$svc" &>/dev/null 2>&1; then
+                    found_chrony=true
+                    echo -ne "  ${CYAN}停止并禁用 ${svc} 服务...${NC} "
+                    systemctl stop    "$svc" &>/dev/null || true
+                    systemctl disable "$svc" &>/dev/null || true
+                    echo -e "${GREEN}✓${NC}"
+                fi
+            done
+        fi
+
+        # 2. 终止孤儿 chronyd 进程
+        if pgrep -x chronyd &>/dev/null; then
+            found_chrony=true
+            echo -ne "  ${CYAN}终止 chronyd 进程...${NC} "
+            pkill -9 chronyd 2>/dev/null || true
+            sleep 1
+            echo -e "${GREEN}✓${NC}"
+        fi
+
+        # 3. 删除工具箱写入的 chrony 配置（识别特征注释 Linux-ops-box）
+        for conf_path in /etc/chrony/chrony.conf /etc/chrony.conf; do
+            if [ -f "$conf_path" ] && grep -q "Linux-ops-box" "$conf_path" 2>/dev/null; then
+                found_chrony=true
+                echo -ne "  ${CYAN}删除工具箱写入的 chrony 配置 [${conf_path}]...${NC} "
+                rm -f "$conf_path"
+                echo -e "${GREEN}✓${NC}"
+                # 若有备份则自动恢复
+                local bak
+                bak=$(ls "${conf_path}.bak_"* 2>/dev/null | sort | tail -1)
+                if [ -n "$bak" ] && [ -f "$bak" ]; then
+                    echo -ne "  ${CYAN}恢复备份配置 [$(basename "$bak")]...${NC} "
+                    mv "$bak" "$conf_path"
+                    echo -e "${GREEN}✓ 已恢复${NC}"
+                fi
+            fi
+        done
+
+        # 4. 删除工具箱自动生成的 chrony.service unit 文件
+        if [ -f /etc/systemd/system/chrony.service ] && \
+           grep -qE "Linux-ops-box|chrony, an NTP client" \
+                    /etc/systemd/system/chrony.service 2>/dev/null; then
+            echo -ne "  ${CYAN}删除工具箱生成的 chrony.service unit...${NC} "
+            rm -f /etc/systemd/system/chrony.service
+            systemctl daemon-reload &>/dev/null
+            echo -e "${GREEN}✓${NC}"
+        fi
+
+        # 5. 清理 PID 文件残留
+        rm -f /var/run/chrony/chronyd.pid /var/run/chronyd.pid 2>/dev/null || true
+
+        if [ "$found_chrony" = false ] && \
+           ! command -v chronyd &>/dev/null && \
+           ! command -v chronyc &>/dev/null; then
+            echo -e "  ${BLUE}  未检测到 Chrony 客户端服务，跳过${NC}"
+        fi
+
+        # 6. 询问是否卸载 chrony 程序包（可执行文件）
+        echo ""
+        if command -v chronyd &>/dev/null || command -v chronyc &>/dev/null; then
+            echo -e "  ${YELLOW}检测到系统仍存在 chrony 程序包 (chronyd/chronyc 命令可用)${NC}"
+            read -p "  是否同时卸载 chrony 程序包（从系统彻底移除）? [y/N]: " rm_pkg < /dev/tty
+            if [[ "$rm_pkg" =~ ^[Yy]$ ]]; then
+                echo -ne "  ${CYAN}正在卸载 chrony 程序包...${NC} "
+                if   command -v apt &>/dev/null; then
+                    apt remove -y chrony &>/dev/null; apt autoremove -y &>/dev/null || true
+                elif command -v dnf &>/dev/null; then
+                    dnf remove -y chrony &>/dev/null || true
+                elif command -v yum &>/dev/null; then
+                    yum remove -y chrony &>/dev/null || true
+                elif command -v apk &>/dev/null; then
+                    apk del chrony &>/dev/null || true
+                else
+                    echo -e "${YELLOW}⚠ 未识别到包管理器，请手动卸载${NC}"
+                fi
+                if ! command -v chronyd &>/dev/null && ! command -v chronyc &>/dev/null; then
+                    echo -e "${GREEN}✓ chrony 程序包已卸载${NC}"
+                else
+                    echo -e "${YELLOW}⚠ 仍检测到残留，请手动确认${NC}"
+                fi
+            else
+                echo -e "  ${BLUE}  跳过程序包卸载（仅清理服务与配置）${NC}"
+            fi
+        fi
+
+        echo -e "  ${GREEN}✅ Chrony 客户端卸载完成${NC}"
+        echo ""
+    }
+
+    # ================================================================
+    # 根据菜单选择执行
+    # ================================================================
+    case "$rm_scope" in
+        1)
+            echo -e "${YELLOW}将清理: Docker NTP 服务器 + 离线配置 + ntp-sync 自启${NC}"
+            read -p "  确认执行? [y/N]: " c < /dev/tty
+            [[ ! "$c" =~ ^[Yy]$ ]] && echo -e "${BLUE}已取消${NC}" && return
+            echo ""
+            _do_remove_docker_ntp
+            ;;
+        2)
+            echo -e "${YELLOW}将清理: Chrony 客户端（停止/禁自启/删配置/可选卸包）${NC}"
+            read -p "  确认执行? [y/N]: " c < /dev/tty
+            [[ ! "$c" =~ ^[Yy]$ ]] && echo -e "${BLUE}已取消${NC}" && return
+            echo ""
+            _do_remove_chrony_client
+            ;;
+        3)
+            echo -e "${RED}将清理: Docker NTP 服务器 + Chrony 客户端 全部移除！${NC}"
+            read -p "  确认执行? [y/N]: " c < /dev/tty
+            [[ ! "$c" =~ ^[Yy]$ ]] && echo -e "${BLUE}已取消${NC}" && return
+            echo ""
+            _do_remove_docker_ntp
+            _do_remove_chrony_client
+            ;;
+        *)
+            echo -e "${RED}无效输入，已取消。${NC}"
+            sleep 1
+            return
+            ;;
+    esac
+
+    echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
+    echo -e " ${GREEN}✅ 清理操作全部完成！${NC}"
+    echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
     echo ""
     read -p "  按回车键返回..." -r < /dev/tty
 }
+
 
 # ================================================================
 # 状态栏：在菜单顶部显示实时时间状态摘要
@@ -2386,7 +2538,7 @@ time_management_menu() {
         echo -e " 5. 查看硬件时钟 (RTC/hwclock) 状态与对齐"
         echo -e "${GREEN}══════════════ ⚡ 运维与操作 ══════════════${NC}"
         echo -e " 6. 立即手动同步系统时间"
-        echo -e " 7. 停止并清理 NTP 服务 (容器/自启服务/脚本)"
+        echo -e " 7. 停止并清理 NTP 服务 (可选: Docker服务器 / Chrony客户端 / 全部)"
         echo -e "${GREEN}══════════════ 🔧 工具管理 ════════════════${NC}"
         echo -e " 8. 安装 NTP 客户端工具 (离线/在线一键安装 chrony / ntpdate)"
         echo -e "${GREEN}==============================================${NC}"
