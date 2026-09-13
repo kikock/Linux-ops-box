@@ -71,63 +71,17 @@ if command -v apt-get &>/dev/null; then
     echo -e "  ${CYAN}[时间管理]${NC} ${DEB_TIME[*]}"
     echo ""
 
-    # 封装 deb 依赖解析与纯隔离下载函数
-    _download_deb_package() {
-        local pkg="$1"
-        local _dl_ok=false
-        local _dep_count=0
-
-        # 方式 1: 纯隔离下载 (使用 apt-cache depends 递归提取依赖链 + apt-get download 纯拉取)
-        # 优点: 零系统侵入，不校验本机已安装状态，即便当前系统处于 broken 状态也能顺利拉取
-        local _deps=()
-        if command -v apt-cache &>/dev/null; then
-            mapfile -t _deps < <(apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces "$pkg" 2>/dev/null | grep -E "^[a-zA-Z0-9]" | grep -v "^<" | sort -u)
-        fi
-
-        # 将主包和依赖包合并
-        local _all_targets=("$pkg")
-        [ ${#_deps[@]} -gt 0 ] && _all_targets+=("${_deps[@]}")
-
-        for p in "${_all_targets[@]}"; do
-            [ -z "$p" ] && continue
-            if ls "${p}"_*.deb &>/dev/null 2>&1; then
-                ((_dep_count++))
-                _dl_ok=true
-                continue
-            fi
-            if apt-get download "$p" &>/dev/null 2>&1; then
-                ((_dep_count++))
-                _dl_ok=true
-            fi
-        done
-
-        # 方式 2: 兜底使用 apt-get install --download-only (如果上面失败且系统正常)
-        if [ "$_dl_ok" = false ]; then
-            if apt-get install --download-only --reinstall -y "$pkg" &>/dev/null 2>&1; then
-                find /var/cache/apt/archives/ -maxdepth 1 -name "*.deb" \
-                    ! -name 'lock' 2>/dev/null | while read -r f; do
-                    bn="$(basename "$f")"
-                    [ ! -f "$bn" ] && cp -n "$f" . 2>/dev/null || true
-                done
-                _dl_ok=true
-            fi
-        fi
-
-        if [ "$_dl_ok" = true ]; then
-            echo -e "${GREEN}[成功, 共 ${_dep_count} 个包]${NC}"
-        else
-            # 单包直接下载重试
-            if apt-get download "$pkg" &>/dev/null 2>&1; then
-                echo -e "${GREEN}[成功(单包)]${NC}"
-            else
-                echo -e "${YELLOW}[跳过/仓库未收录]${NC}"
-            fi
-        fi
-    }
-
     for pkg in "${DEB_LIST[@]}"; do
-        echo -n "  ➜ 正在下载 ${pkg} (含依赖) ... "
-        _download_deb_package "$pkg"
+        echo -n "  ➜ 正在下载 ${pkg} ... "
+        if ls "${pkg}"_*.deb &>/dev/null 2>&1; then
+            echo -e "${GREEN}[已存在，跳过]${NC}"
+            continue
+        fi
+        if apt-get download "$pkg" &>/dev/null 2>&1; then
+            echo -e "${GREEN}[成功]${NC}"
+        else
+            echo -e "${YELLOW}[跳过/未收录]${NC}"
+        fi
     done
     cd - >/dev/null
 
