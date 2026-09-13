@@ -47,7 +47,7 @@ if command -v apt-get &>/dev/null; then
     cd "$local_sub"
 
     # ── 基础工具 ────────────────────────────────────────────────────
-    DEB_BASIC=(curl openssl lsof socat tar wget cron dnsutils nano vim htop net-tools unzip zip)
+    DEB_BASIC=(curl openssl lsof socat tar wget cron dnsutils nano vim htop net-tools unzip zip openssh-server)
     # ── 时间管理工具 (time_mgmt.sh 依赖) ────────────────────────────
     # chrony   : chronyc 命令 (现代 NTP 守护进程)
     # ntpdate  : 手动单次同步
@@ -58,7 +58,7 @@ if command -v apt-get &>/dev/null; then
     DEB_LIST=("${DEB_BASIC[@]}" "${DEB_TIME[@]}")
 
     echo -e "下载目标:"
-    echo -e "  ${CYAN}[基础工具]${NC} ${DEB_BASIC[*]}"
+    echo -e "  ${CYAN}[基础与SSH]${NC} ${DEB_BASIC[*]}"
     echo -e "  ${CYAN}[时间管理]${NC} ${DEB_TIME[*]}"
     echo ""
 
@@ -96,7 +96,7 @@ elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
     echo -e "⏳ 正在下载 .rpm 离线包到: ${CYAN}${local_sub}${NC} ..."
 
     # ── 基础工具 ────────────────────────────────────────────────────
-    RPM_BASIC=(curl openssl lsof socat tar wget cronie bind-utils nano vim-enhanced htop net-tools unzip zip)
+    RPM_BASIC=(curl openssl lsof socat tar wget cronie bind-utils nano vim-enhanced htop net-tools unzip zip openssh-server openssh-clients)
     # ── 时间管理工具 (time_mgmt.sh 依赖) ────────────────────────────
     # chrony   : chronyc (现代 NTP 守护进程)
     # ntp      : ntpdate + ntpq (注: RHEL 8+ 上游已废弃 ntpdate 独立包)

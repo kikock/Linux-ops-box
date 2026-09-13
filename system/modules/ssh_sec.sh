@@ -315,6 +315,71 @@ manage_ssh_certs() {
     done
 }
 
+# ================================================================
+# 辅助函数: 无依赖网络连通性探测 (自包含)
+# ================================================================
+_check_net_available() {
+    local timeout=3
+    # 方法 1: Bash /dev/tcp 探测 1.1.1.1:80（Cloudflare，无需 DNS）
+    if (exec 9<>/dev/tcp/1.1.1.1/80) 2>/dev/null; then
+        exec 9>&- 2>/dev/null
+        return 0
+    fi
+    # 方法 2: /dev/tcp 探测 8.8.8.8:53（Google DNS）
+    if (exec 9<>/dev/tcp/8.8.8.8/53) 2>/dev/null; then
+        exec 9>&- 2>/dev/null
+        return 0
+    fi
+    # 方法 3: ping 降级兜底
+    if ping -c1 -W${timeout} 1.1.1.1 &>/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+# ================================================================
+# 辅助函数: 准确探测 SSH 真实服务单元名称
+# 涵盖 Debian/Ubuntu (ssh), RHEL/CentOS/Euler/Kylin (sshd)
+# ================================================================
+_detect_ssh_service_name() {
+    if command -v systemctl &>/dev/null; then
+        # 1. 运行中的优先判断
+        if systemctl is-active --quiet ssh 2>/dev/null; then
+            echo "ssh"
+            return 0
+        fi
+        if systemctl is-active --quiet sshd 2>/dev/null; then
+            echo "sshd"
+            return 0
+        fi
+        # 2. 检查 unit 文件是否存在
+        if systemctl cat ssh.service &>/dev/null; then
+            echo "ssh"
+            return 0
+        fi
+        if systemctl cat sshd.service &>/dev/null; then
+            echo "sshd"
+            return 0
+        fi
+        if [ -n "${SVC_SSH:-}" ] && systemctl cat "${SVC_SSH}.service" &>/dev/null; then
+            echo "$SVC_SSH"
+            return 0
+        fi
+    fi
+
+    # SysVinit / OpenRC 探测
+    if [ -f /etc/init.d/ssh ]; then echo "ssh"; return 0; fi
+    if [ -f /etc/init.d/sshd ]; then echo "sshd"; return 0; fi
+
+    # 包管理器推断默认名称
+    if command -v apt &>/dev/null; then
+        echo "ssh"
+    else
+        echo "sshd"
+    fi
+    return 0
+}
+
 # 2.5 SSH 配置巡检
 check_ssh_config() {
     # 强制确保变量已初始化
@@ -333,8 +398,33 @@ check_ssh_config() {
     # [1] 配置文件
     echo -e "${YELLOW}[1] SSH 配置文件路径: ${SSHD_CONFIG}${NC}"
     if [ ! -f "$SSHD_CONFIG" ]; then
-        echo -e "${RED}    ✗ 配置文件不存在，请确认 SSH 服务是否已安装${NC}"
-        read -p "按回车键返回..."; return
+        echo -e "${RED}    ✗ 配置文件不存在${NC}"
+        echo ""
+        echo -e "${YELLOW}  【诊断说明】${NC}"
+        echo -e "  sshd_config 由 openssh-server 安装时创建，与服务是否启动无关。"
+        echo -e "  文件不存在 = ${RED}openssh-server 软件包尚未安装${NC}（而非服务未启动）。"
+        echo ""
+        echo -e "${CYAN}  【修复方法】根据您的系统执行以下命令安装:${NC}"
+        if command -v apt &>/dev/null; then
+            echo -e "    ${GREEN}apt update && apt install -y openssh-server${NC}"
+        elif command -v dnf &>/dev/null; then
+            echo -e "    ${GREEN}dnf install -y openssh-server${NC}"
+        elif command -v yum &>/dev/null; then
+            echo -e "    ${GREEN}yum install -y openssh-server${NC}"
+        elif command -v apk &>/dev/null; then
+            echo -e "    ${GREEN}apk add openssh${NC}"
+        else
+            echo -e "    ${GREEN}apt install -y openssh-server${NC}  # Debian/Ubuntu"
+            echo -e "    ${GREEN}yum install -y openssh-server${NC}  # CentOS/RHEL"
+        fi
+        echo ""
+        echo -e "  安装完成后，执行: ${CYAN}systemctl enable --now ssh${NC} (或 sshd)"
+        echo ""
+        read -p "  是否立即进入「SSH 服务管理中心」进行安装？[Y/n]: " _goto_svc -r < /dev/tty
+        if [[ -z "$_goto_svc" || "$_goto_svc" =~ ^[Yy]$ ]]; then
+            manage_ssh_service
+        fi
+        return
     else
         echo -e "${GREEN}    ✓ 配置文件存在${NC}"
     fi
@@ -358,7 +448,7 @@ check_ssh_config() {
     echo -e "${YELLOW}[4] 实际运行时 SSH 监听状态${NC}"
     if command -v ss &>/dev/null; then
         echo -e "    使用 ss 命令检测:"
-        SS_RESULT=$(ss -tlnp | grep sshd)
+        SS_RESULT=$(ss -tlnp 2>/dev/null | grep -E 'sshd|ssh')
         if [ -z "$SS_RESULT" ]; then
             echo -e "    ${RED}✗ 未检测到 sshd 进程正在监听（服务可能未启动）${NC}"
         else
@@ -367,7 +457,7 @@ check_ssh_config() {
             done
         fi
     elif command -v netstat &>/dev/null; then
-        NETSTAT_RESULT=$(netstat -tlnp 2>/dev/null | grep sshd)
+        NETSTAT_RESULT=$(netstat -tlnp 2>/dev/null | grep -E 'sshd|ssh')
         if [ -z "$NETSTAT_RESULT" ]; then
             echo -e "    ${RED}✗ 未检测到 sshd 监听${NC}"
         else
@@ -382,10 +472,10 @@ check_ssh_config() {
 
     # [5] 认证配置
     echo -e "${YELLOW}[5] 认证配置${NC}"
-    PASSWD_AUTH=$(grep -E "^PasswordAuthentication " "$SSHD_CONFIG" | awk '{print $2}')
-    PERMIT_EMPTY=$(grep -E "^PermitEmptyPasswords " "$SSHD_CONFIG" | awk '{print $2}')
-    PERMIT_ROOT=$(grep -E "^PermitRootLogin " "$SSHD_CONFIG" | awk '{print $2}')
-    PUBKEY_AUTH=$(grep -E "^PubkeyAuthentication " "$SSHD_CONFIG" | awk '{print $2}')
+    PASSWD_AUTH=$(grep -E "^PasswordAuthentication " "$SSHD_CONFIG" 2>/dev/null | awk '{print $2}')
+    PERMIT_EMPTY=$(grep -E "^PermitEmptyPasswords " "$SSHD_CONFIG" 2>/dev/null | awk '{print $2}')
+    PERMIT_ROOT=$(grep -E "^PermitRootLogin " "$SSHD_CONFIG" 2>/dev/null | awk '{print $2}')
+    PUBKEY_AUTH=$(grep -E "^PubkeyAuthentication " "$SSHD_CONFIG" 2>/dev/null | awk '{print $2}')
     [ -z "$PASSWD_AUTH" ]  && PASSWD_AUTH="yes (默认值)"
     [ -z "$PERMIT_EMPTY" ] && PERMIT_EMPTY="no (默认值)"
     [ -z "$PERMIT_ROOT" ]  && PERMIT_ROOT="prohibit-password (默认值)"
@@ -402,7 +492,7 @@ check_ssh_config() {
         if [[ "$uid" -ge 0 ]] && [[ "$shell" != */nologin ]] && [[ "$shell" != */false ]]; then
             auth_keys="${homedir}/.ssh/authorized_keys"
             if [ -f "$auth_keys" ]; then
-                key_count=$(wc -l < "$auth_keys")
+                key_count=$(grep -c . "$auth_keys" 2>/dev/null || echo 0)
                 echo -e "    用户: ${GREEN}${username}${NC} (UID=${uid})  公钥数: ${key_count} 条"
                 while IFS= read -r keyline; do
                     [[ "$keyline" =~ ^#.*$ || -z "$keyline" ]] && continue
@@ -415,34 +505,46 @@ check_ssh_config() {
     done < /etc/passwd
     echo ""
 
-    # [7] SSH 服务状态 (彻底修复逻辑)
+    # [7] SSH 服务状态 (精准探测)
     echo -e "${YELLOW}[7] SSH 服务运行状态${NC}"
-    if command -v systemctl &>/dev/null; then
-        local ACTUAL_SVC=""
-        if [ "$(systemctl is-active ssh 2>/dev/null)" = "active" ]; then
-            ACTUAL_SVC="ssh"
-        elif [ "$(systemctl is-active sshd 2>/dev/null)" = "active" ]; then
-            ACTUAL_SVC="sshd"
-        else
-            ACTUAL_SVC="${SVC_SSH:-sshd}"
-        fi
+    local ACTUAL_SVC
+    ACTUAL_SVC=$(_detect_ssh_service_name)
+    local ACTUAL_STATUS="inactive"
 
-        ACTUAL_STATUS=$(systemctl is-active "$ACTUAL_SVC" 2>/dev/null)
-        
-        if [ "$ACTUAL_STATUS" = "active" ]; then
+    if command -v systemctl &>/dev/null; then
+        if systemctl is-active --quiet "$ACTUAL_SVC" 2>/dev/null; then
+            ACTUAL_STATUS="active"
             echo -e "    状态: ${GREEN}✓ 运行中 (active)${NC}"
             echo -e "    服务: ${CYAN}${ACTUAL_SVC}${NC}"
             systemctl status "$ACTUAL_SVC" --no-pager -l 2>/dev/null | grep -E "Active:|Main PID:" | while read -r line; do
                 echo -e "    ${line}"
             done
         else
-            echo -e "    状态: ${RED}✗ 未运行 (${ACTUAL_STATUS:-unknown})${NC}"
-            echo -e "    提示: 脚本尝试检查的是 [${YELLOW}${ACTUAL_SVC}${NC}]，请确认该服务名是否正确。"
+            ACTUAL_STATUS="$(systemctl is-active "$ACTUAL_SVC" 2>/dev/null || echo "inactive")"
+            echo -e "    状态: ${RED}✗ 未运行 (${ACTUAL_STATUS})${NC}"
+            echo -e "    服务名称: ${YELLOW}${ACTUAL_SVC}${NC}"
+            echo -e "    提示: 可在 [6. SSH 服务管理中心] 启动或重启服务。"
         fi
+    elif command -v rc-service &>/dev/null; then
+        if rc-service "$ACTUAL_SVC" status &>/dev/null; then
+            ACTUAL_STATUS="active"
+            echo -e "    状态: ${GREEN}✓ 运行中${NC} (OpenRC)"
+        else
+            echo -e "    状态: ${RED}✗ 未运行${NC} (OpenRC)"
+        fi
+    elif command -v service &>/dev/null; then
+        if service "$ACTUAL_SVC" status &>/dev/null; then
+            ACTUAL_STATUS="active"
+            echo -e "    状态: ${GREEN}✓ 运行中${NC} (SysVinit)"
+        else
+            echo -e "    状态: ${RED}✗ 未运行${NC} (SysVinit)"
+        fi
+    else
+        echo -e "    ${YELLOW}无法确定服务状态管理器${NC}"
     fi
 
     # [8] 本机 IP
-    echo -e "${YELLOW}[8] 本机网络 IP 地址${NC}"
+    echo -e "\n${YELLOW}[8] 本机网络 IP 地址${NC}"
     ip -4 addr show 2>/dev/null | grep -E "inet " | grep -v "127.0.0.1" | while read -r line; do
         iface=$(echo "$line" | awk '{print $NF}')
         addr=$(echo "$line" | awk '{print $2}')
@@ -465,10 +567,324 @@ check_ssh_config() {
     fi
     echo ""
     echo -e "${GREEN}检查完毕！${NC}"
-    read -p "按回车键返回..."
+    echo ""
+
+    # 若未处于运行状态，主动询问是否跳转到服务管理中心
+    if [ "$ACTUAL_STATUS" != "active" ]; then
+        echo -e "${YELLOW}💡 检测到 SSH 服务当前未运行，是否进入服务管理中心进行启动或排查？[Y/n]: ${NC}"
+        read -p "  立即进入? [Y/n]: " _handle_svc -r < /dev/tty
+        if [[ -z "$_handle_svc" || "$_handle_svc" =~ ^[Yy]$ ]]; then
+            manage_ssh_service
+            return
+        fi
+    else
+        read -p "按回车键返回..." -r < /dev/tty
+    fi
 }
 
-# 2.6 SSH 管理总入口 (二级菜单)
+# ================================================================
+# 2.6 SSH 服务管理中心
+# 功能: 查看状态 / 启动 / 停止 / 重启 / 开机自启 / 安装 openssh-server
+# ================================================================
+manage_ssh_service() {
+    while true; do
+        clear
+        echo -e "${CYAN}======================================================${NC}"
+        echo -e "${CYAN}          🔑 SSH 服务管理中心 (运行与安装)            ${NC}"
+        echo -e "${CYAN}======================================================${NC}"
+
+        # ── 实时状态展示 ──────────────────────────────────────────
+        local _installed=false _running=false _enabled=false _svc_name=""
+
+        # 检测安装状态 (sshd_config 存在或 sshd 命令存在)
+        if [ -f /etc/ssh/sshd_config ] || command -v sshd &>/dev/null; then
+            _installed=true
+        fi
+
+        # 获取当前系统推断的服务名称
+        _svc_name="$(_detect_ssh_service_name)"
+
+        # 检测服务状态
+        if command -v systemctl &>/dev/null; then
+            if systemctl is-active --quiet "$_svc_name" 2>/dev/null; then
+                _running=true
+            fi
+            if systemctl is-enabled --quiet "$_svc_name" 2>/dev/null; then
+                _enabled=true
+            fi
+        elif command -v rc-service &>/dev/null; then
+            rc-service "$_svc_name" status &>/dev/null && _running=true
+        elif command -v service &>/dev/null; then
+            service "$_svc_name" status &>/dev/null && _running=true
+        fi
+
+        # 状态展示区
+        echo -e "  安装状态 : $([ "$_installed" = true ] && echo -e "${GREEN}✓ 已安装 (openssh-server)${NC}" || echo -e "${RED}✗ 未安装${NC}")"
+        echo -e "  服务名称 : ${CYAN}${_svc_name}${NC}"
+        echo -e "  运行状态 : $([ "$_running" = true ] && echo -e "${GREEN}● 运行中 (active)${NC}" || echo -e "${RED}● 已停止 (inactive)${NC}")"
+        if command -v systemctl &>/dev/null; then
+            echo -e "  开机自启 : $([ "$_enabled" = true ] && echo -e "${GREEN}已开启 (enabled)${NC}" || echo -e "${YELLOW}未开启 (disabled)${NC}")"
+        fi
+        echo ""
+        echo -e "${CYAN}======================================================${NC}"
+
+        # ── 菜单选项 ───────────────────────────────────────────
+        echo -e " 1. 查看服务详细状态 (systemctl status / 日志)"
+        echo -e " 2. 启动 SSH 服务"
+        echo -e " 3. 停止 SSH 服务 ${RED}[危险操作，可能导致断连]${NC}"
+        echo -e " 4. 重启 SSH 服务 (使新配置立即生效)"
+        echo -e " 5. 设为开机自启 (enable)"
+        echo -e " 6. 取消开机自启 (disable)"
+        if [ "$_installed" = false ]; then
+            echo -e " ${GREEN}7. 安装 openssh-server (当前未安装，一键部署)${NC}"
+        else
+            echo -e " 7. 重新安装 / 修复 openssh-server"
+        fi
+        echo -e " 0. 返回上级菜单"
+        echo -e "${CYAN}======================================================${NC}"
+        read -p "请选择操作 [0-7]: " _svc_choice < /dev/tty
+        echo ""
+
+        # 需要安装了服务才能执行的操作预检查
+        case "$_svc_choice" in
+            2|3|4|5|6)
+                if [ "$_installed" = false ]; then
+                    echo -e "${RED}✗ 系统尚未安装 openssh-server，无法操作服务。${NC}"
+                    echo -e "  ${YELLOW}请先选择选项 [7] 安装 openssh-server。${NC}"
+                    read -p "  按回车键继续..." -r < /dev/tty
+                    continue
+                fi
+            ;;
+        esac
+
+        case "$_svc_choice" in
+            1)
+                echo -e "${BLUE}🔍 SSH 服务详细状态:${NC}"
+                echo ""
+                if command -v systemctl &>/dev/null; then
+                    systemctl status "$_svc_name" --no-pager -l 2>/dev/null || true
+                elif command -v rc-service &>/dev/null; then
+                    rc-service "$_svc_name" status
+                elif command -v service &>/dev/null; then
+                    service "$_svc_name" status
+                fi
+                echo ""
+                read -p "按回车键继续..." -r < /dev/tty
+                ;;
+            2)
+                echo -e "${YELLOW}⏳ 正在启动 ${_svc_name} 服务...${NC}"
+                if command -v systemctl &>/dev/null; then
+                    if systemctl start "$_svc_name" 2>/dev/null; then
+                        echo -e "${GREEN}✅ SSH 服务启动成功！${NC}"
+                        systemctl status "$_svc_name" --no-pager -l 2>/dev/null | grep 'Active:' | \
+                            xargs -I{} echo -e "  {}"
+                    else
+                        echo -e "${RED}✗ 启动失败，请检查日志: journalctl -xe --unit=${_svc_name}${NC}"
+                    fi
+                elif command -v rc-service &>/dev/null; then
+                    rc-service "$_svc_name" start
+                elif command -v service &>/dev/null; then
+                    service "$_svc_name" start
+                fi
+                read -p "按回车键继续..." -r < /dev/tty
+                ;;
+            3)
+                echo -e "${RED}⚠️ 警告: 停止 SSH 服务可能中断当前远程终端连接！${NC}"
+                read -p "  确认停止? [y/N]: " _confirm < /dev/tty
+                if [[ "$_confirm" =~ ^[Yy]$ ]]; then
+                    if command -v systemctl &>/dev/null; then
+                        systemctl stop "$_svc_name" 2>/dev/null && \
+                            echo -e "${GREEN}✅ SSH 服务已停止。${NC}" || \
+                            echo -e "${RED}✗ 停止失败。${NC}"
+                    elif command -v service &>/dev/null; then
+                        service "$_svc_name" stop
+                    fi
+                else
+                    echo -e "${BLUE}操作已取消。${NC}"
+                fi
+                read -p "按回车键继续..." -r < /dev/tty
+                ;;
+            4)
+                echo -e "${YELLOW}⏳ 正在检查配置并重启 ${_svc_name} 服务...${NC}"
+                if command -v sshd &>/dev/null; then
+                    if ! sshd -t 2>/dev/null; then
+                        echo -e "${RED}⚠️ sshd 配置语法检查失败，强行重启可能导致无法连接！${NC}"
+                        sshd -t 2>&1 | head -10 || true
+                        echo ""
+                        read -p "  仍然强制重启? [y/N]: " _force_rst < /dev/tty
+                        if ! [[ "$_force_rst" =~ ^[Yy]$ ]]; then
+                            echo -e "${BLUE}操作已取消。${NC}"
+                            read -p "按回车键继续..." -r < /dev/tty
+                            continue
+                        fi
+                    fi
+                fi
+
+                if command -v systemctl &>/dev/null; then
+                    if systemctl restart "$_svc_name" 2>/dev/null; then
+                        echo -e "${GREEN}✅ SSH 服务重启成功！配置已生效。${NC}"
+                        systemctl status "$_svc_name" --no-pager -l 2>/dev/null | grep 'Active:' | \
+                            xargs -I{} echo -e "  {}"
+                    else
+                        echo -e "${RED}✗ 重启失败，详细错误:${NC}"
+                        journalctl -u "$_svc_name" -n 15 --no-pager 2>/dev/null || true
+                    fi
+                elif command -v service &>/dev/null; then
+                    service "$_svc_name" restart
+                fi
+                read -p "按回车键继续..." -r < /dev/tty
+                ;;
+            5)
+                if command -v systemctl &>/dev/null; then
+                    systemctl enable "$_svc_name" 2>/dev/null && \
+                        echo -e "${GREEN}✅ SSH 服务已设为开机自启 (enabled)。${NC}" || \
+                        echo -e "${RED}✗ 设置失败。${NC}"
+                elif command -v rc-update &>/dev/null; then
+                    rc-update add "$_svc_name" default
+                fi
+                read -p "按回车键继续..." -r < /dev/tty
+                ;;
+            6)
+                echo -e "${YELLOW}⚠️ 取消自启后，系统重启后 SSH 服务将不会自动拉起。${NC}"
+                read -p "  确认取消自启? [y/N]: " _confirm < /dev/tty
+                if [[ "$_confirm" =~ ^[Yy]$ ]]; then
+                    if command -v systemctl &>/dev/null; then
+                        systemctl disable "$_svc_name" 2>/dev/null && \
+                            echo -e "${GREEN}✅ 开机自启已取消 (disabled)。${NC}" || \
+                            echo -e "${RED}✗ 取消失败。${NC}"
+                    elif command -v rc-update &>/dev/null; then
+                        rc-update del "$_svc_name" default
+                    fi
+                else
+                    echo -e "${BLUE}操作已取消。${NC}"
+                fi
+                read -p "按回车键继续..." -r < /dev/tty
+                ;;
+            7)
+                # ── 安装 / 重装 openssh-server ─────────────────────────
+                echo -e "${CYAN}======================================================${NC}"
+                echo -e "${CYAN}         安装 / 重装 openssh-server              ${NC}"
+                echo -e "${CYAN}======================================================${NC}"
+
+                # 先检测网络
+                echo -ne "${BLUE}正在检测网络连通性...${NC} "
+                if _check_net_available; then
+                    echo -e "${GREEN}✓ 网络可达 (在线安装模式)${NC}"
+                    echo ""
+                    local _pkg_cmd=""
+                    local _pkg_name="openssh-server"
+                    if command -v apt &>/dev/null; then
+                        _pkg_cmd="apt"
+                        echo -e "${YELLOW}⏳ 执行: apt update && apt install -y openssh-server...${NC}"
+                        apt update -y 2>/dev/null || true
+                        apt install -y openssh-server
+                    elif command -v dnf &>/dev/null; then
+                        _pkg_cmd="dnf"
+                        echo -e "${YELLOW}⏳ 执行: dnf install -y openssh-server openssh-clients...${NC}"
+                        dnf install -y openssh-server openssh-clients
+                    elif command -v yum &>/dev/null; then
+                        _pkg_cmd="yum"
+                        echo -e "${YELLOW}⏳ 执行: yum install -y openssh-server openssh-clients...${NC}"
+                        yum install -y openssh-server openssh-clients
+                    elif command -v apk &>/dev/null; then
+                        _pkg_cmd="apk"
+                        echo -e "${YELLOW}⏳ 执行: apk add openssh...${NC}"
+                        apk add openssh
+                    else
+                        echo -e "${RED}✗ 未检测到受支持的包管理器。${NC}"
+                        read -p "按回车键继续..." -r < /dev/tty
+                        continue
+                    fi
+
+                    local _install_exit=$?
+                    echo ""
+                    local _detect_again
+                    _detect_again="$(_detect_ssh_service_name)"
+                    if [ $_install_exit -eq 0 ] && ([ -f /etc/ssh/sshd_config ] || command -v sshd &>/dev/null); then
+                        echo -e "${GREEN}✅ openssh-server 安装成功！${NC}"
+                        echo -e "${YELLOW}⏳ 正在启动并设置开机自启 (${_detect_again})...${NC}"
+                        if command -v systemctl &>/dev/null; then
+                            systemctl enable --now "$_detect_again" 2>/dev/null && \
+                                echo -e "${GREEN}✅ SSH 服务已成功启动并设为开机自启。${NC}" || true
+                        fi
+                    else
+                        echo -e "${YELLOW}⚠️ 在线安装可能未完全成功，请检查上方日志输出。${NC}"
+                    fi
+                else
+                    echo -e "${RED}✗ 网络不可达（离线模式）${NC}"
+                    echo ""
+                    # 尝试自动查找本地离线包
+                    local _local_pkg_dir=""
+                    for d in "${BASE_DIR:-}/packages" "/opt/ck_sysinit/packages" \
+                             "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../packages" \
+                             "$PWD/system/packages" "$PWD/packages"; do
+                        if [ -d "$d" ]; then
+                            _local_pkg_dir="$d"
+                            break
+                        fi
+                    done
+
+                    local _offline_installed=false
+                    if [ -n "$_local_pkg_dir" ]; then
+                        if command -v dpkg &>/dev/null; then
+                            local _deb_files
+                            _deb_files=$(find "$_local_pkg_dir" -name "*openssh*server*.deb" 2>/dev/null || true)
+                            if [ -n "$_deb_files" ]; then
+                                echo -e "${GREEN}✓ 发现本地离线包:${NC}"
+                                echo "$_deb_files" | sed 's/^/    /'
+                                read -p "  是否立即执行离线安装? [Y/n]: " _do_deb < /dev/tty
+                                if [[ -z "$_do_deb" || "$_do_deb" =~ ^[Yy]$ ]]; then
+                                    echo -e "${YELLOW}⏳ 正在执行 dpkg -i 安装...${NC}"
+                                    dpkg -i $_deb_files 2>/dev/null || apt-get install -f -y 2>/dev/null || true
+                                    _offline_installed=true
+                                fi
+                            fi
+                        elif command -v rpm &>/dev/null; then
+                            local _rpm_files
+                            _rpm_files=$(find "$_local_pkg_dir" -name "*openssh*server*.rpm" 2>/dev/null || true)
+                            if [ -n "$_rpm_files" ]; then
+                                echo -e "${GREEN}✓ 发现本地离线包:${NC}"
+                                echo "$_rpm_files" | sed 's/^/    /'
+                                read -p "  是否立即执行离线安装? [Y/n]: " _do_rpm < /dev/tty
+                                if [[ -z "$_do_rpm" || "$_do_rpm" =~ ^[Yy]$ ]]; then
+                                    echo -e "${YELLOW}⏳ 正在执行 rpm 安装...${NC}"
+                                    rpm -Uvh --replacepkgs --nodeps $_rpm_files 2>/dev/null || true
+                                    _offline_installed=true
+                                fi
+                            fi
+                        fi
+                    fi
+
+                    if [ "$_offline_installed" = true ]; then
+                        local _detect_again
+                        _detect_again="$(_detect_ssh_service_name)"
+                        echo -e "${GREEN}✅ 离线安装命令已执行！${NC}"
+                        if command -v systemctl &>/dev/null; then
+                            systemctl enable --now "$_detect_again" 2>/dev/null || true
+                        fi
+                    else
+                        echo -e "${YELLOW}📋 离线环境手动部署指南:${NC}"
+                        echo -e "  1. 在【有互联网连接】的同系统机器上执行工具箱："
+                        echo -e "     进入 [系统环境优化 → 9. 采集离线安装包]"
+                        echo -e "  2. 采集完成后，将 ${CYAN}packages/${NC} 目录拷贝到无网机器"
+                        echo -e "  3. 再次进入本菜单选项 7 即可一键自动离线部署，或手动执行:"
+                        echo -e "     ${CYAN}dpkg -i packages/deb/openssh-server*.deb${NC} (Debian/Ubuntu)"
+                        echo -e "     ${CYAN}rpm -Uvh packages/rpm/openssh-server*.rpm${NC} (CentOS/RHEL)"
+                    fi
+                fi
+                echo ""
+                read -p "按回车键继续..." -r < /dev/tty
+                ;;
+            0) break ;;
+            *)
+                echo -e "${RED}无效输入。${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# 2.7 SSH 管理总入口 (二级菜单)
 ssh_menu() {
     while true; do
         clear
@@ -480,9 +896,10 @@ ssh_menu() {
         echo " 3. 生成 SSH 公私钥对 (保存至 /data/ssh_key)"
         echo " 4. SSH 证书管理 (authorized_keys)"
         echo " 5. SSH 配置巡检 (端口/认证/公钥/服务状态)"
+        echo " 6. SSH 服务管理中心 (状态/启动/重启/自启/安装)"
         echo " 0. 返回主菜单"
         echo -e "${GREEN}==============================================${NC}"
-        read -p "请选择操作 [0-5]: " ssh_main_choice
+        read -p "请选择操作 [0-6]: " ssh_main_choice
 
         case $ssh_main_choice in
             1) change_user_password ;;
@@ -490,9 +907,11 @@ ssh_menu() {
             3) generate_ssh_keypair ;;
             4) manage_ssh_certs ;;
             5) check_ssh_config ;;
+            6) manage_ssh_service ;;
             0) break ;;
             *) echo -e "${RED}无效输入。${NC}"; sleep 1 ;;
         esac
     done
 }
+
 
