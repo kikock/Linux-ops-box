@@ -71,8 +71,9 @@ if command -v apt-get &>/dev/null; then
     echo -e "  ${CYAN}[时间管理]${NC} ${DEB_TIME[*]}"
     echo ""
 
-    for pkg in "${DEB_LIST[@]}"; do
-        echo -n "  ➜ 正在下载 ${pkg} (含依赖) ... "
+    # 封装 deb 依赖解析与纯隔离下载函数
+    _download_deb_package() {
+        local pkg="$1"
         local _dl_ok=false
         local _dep_count=0
 
@@ -122,6 +123,11 @@ if command -v apt-get &>/dev/null; then
                 echo -e "${YELLOW}[跳过/仓库未收录]${NC}"
             fi
         fi
+    }
+
+    for pkg in "${DEB_LIST[@]}"; do
+        echo -n "  ➜ 正在下载 ${pkg} (含依赖) ... "
+        _download_deb_package "$pkg"
     done
     cd - >/dev/null
 
