@@ -18,7 +18,8 @@
   - [3.3 方案三：ntpdate 单次同步 + Crontab 定时（传统应急方案）](#33-方案三ntpdate-单次同步--crontab-定时传统应急方案)
   - [3.4 方案四：使用运维工具一键健康检测（支持任意 IP+端口）](#34-方案四使用运维工具一键健康检测支持任意-ip端口)
 - [4. 双机联调验证](#4-双机联调验证)
-- [5. 核心避坑与故障排查速查表 (FAQ)](#5-核心避坑与故障排查速查表-faq)
+- [5. 服务停止、恢复与彻底清理（下线回退）](#5-服务停止恢复与彻底清理下线回退)
+- [6. 核心避坑与故障排查速查表 (FAQ)](#6-核心避坑与故障排查速查表-faq)
 
 ---
 
@@ -124,13 +125,11 @@ cd /data/ntp && docker compose up -d
 | **DEB 体系** (APT) | Ubuntu 20.04/22.04/24.04、Debian 10/11/12、统信 UOS、麒麟桌面版 | `chrony`、`ntpdate` | `system/packages/deb/chrony_4.5-1ubuntu4_amd64.deb`<br>`system/packages/deb/ntpdate_4.2.8p15+dfsg-1ubuntu2_amd64.deb` |
 | **RPM 体系** (YUM/DNF) | CentOS 7/8、RHEL 7/8/9、Rocky、AlmaLinux、银河麒麟 V10 Server、openEuler | `chrony`、`ntpdate` | `system/packages/rpm/chrony-3.4-1.el7.x86_64.rpm`<br>`system/packages/rpm/ntpdate-4.2.6p5-29.el7.centos.2.x86_64.rpm` |
 
-> 💡 **在线增补离线包**：若需在联网跳板机上为特定异构系统重新抓取离线包，只需在联网机执行：
+> 💡 **在线增补与更新离线包**：若需在联网跳板机上为特定发行版重新抓取或更新离线包，只需在联网机执行：
 > ```bash
 > bash system/download_offline_packages.sh
-> # 或执行 Python 离线包采集引擎：
-> python3 system/fetch_packages.py
 > ```
-> 脚本会自动检测当前系统版本，将完整依赖包下载整理至 `system/packages/` 目录下，直接打包拷入内网即可。
+> 脚本会自动检测当前系统为 Debian/Ubuntu 或 RHEL/CentOS，仅精准拉取正版官方核心主包，整理存入 `system/packages/deb/` 或 `system/packages/rpm/`，避免拉取臃肿冗余的底层依赖导致系统损坏，直接整体打包拷入内网即可。
 
 ---
 
@@ -297,8 +296,28 @@ sudo ss -ulpn | grep :123
 ```
 
 #### ③ 使用 Bash 原生 UDP 套接字探测（无需额外工具）
+
 ```bash
+# 方式 A：单行命令探测 (兼容带 timeout 命令的常规系统)
 timeout 3 bash -c 'exec 9<>/dev/udp/127.0.0.1/123 && printf "\x1b\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00" >&9 && read -r -t 2 -n 1 <&9' && echo "✓ NTP UDP 123 端口响应正常" || echo "✗ NTP 无响应"
+
+# 方式 B：纯原生 Bash 零依赖探测函数 (无需 timeout 命令，兼容 Alpine / 嵌入式 Linux)
+check_ntp_udp() {
+    local host="${1:-127.0.0.1}" port="${2:-123}"
+    exec 9<>/dev/udp/${host}/${port} 2>/dev/null || { echo "✗ 无法开启 UDP 套接字"; return 1; }
+    printf '\x1b\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00' >&9 2>/dev/null || { exec 9>&-; echo "✗ 发送失败"; return 1; }
+    local resp=""
+    IFS= read -r -t 3 -d '' -n 1 resp <&9 2>/dev/null
+    local rc=$?
+    exec 9>&-
+    if [ $rc -eq 0 ] || [ -n "$resp" ]; then
+        echo "✓ NTP UDP 端口响应正常 (${host}:${port})"
+        return 0
+    fi
+    echo "✗ NTP UDP 端口超时/无响应 (${host}:${port})"
+    return 1
+}
+check_ntp_udp 127.0.0.1 123
 ```
 
 ---
@@ -514,7 +533,64 @@ server 192.168.1.100, stratum 2, offset 0.001245, delay 0.02612
 
 ---
 
-## 5. 核心避坑与故障排查速查表 (FAQ)
+## 5. 服务停止、恢复与彻底清理（下线回退）
+
+在实际生产运维中，若需要变更架构、注销节点或恢复到初始环境，请按以下步骤优雅下线。
+
+### 5.1 方式一：使用工具箱 TUI 菜单一键清理（强烈推荐）
+在终端运行：
+```bash
+bash system/system_init.sh
+# 依次进入：[14] 系统时间管理中心 → 选择 [7] 停止并清理 NTP 服务
+```
+工具箱提供交互式安全清理菜单：
+- **选项 1：仅清理 Docker NTP 服务器**：停止并删除 `ntp-server` 容器，清理 `/etc/ntp-docker` 目录与开机同步服务，保留宿主机业务环境。
+- **选项 2：仅卸载 Chrony 客户端**：停止并禁用服务，自动查杀孤儿 `chronyd` 进程，自动检测并还原历史备份配置（`chrony.conf.bak_*`），可选彻底卸载软件包。
+- **选项 3：全部清理**：彻底注销双端 NTP 部署，使系统恢复纯净状态。
+
+### 5.2 方式二：手动执行终端清理指令
+
+#### ① 停止并清理 A 主机 Docker NTP 服务端
+```bash
+# 1. 停止并删除容器
+docker stop ntp-server 2>/dev/null && docker rm ntp-server 2>/dev/null
+
+# 2. 清理离线挂载配置文件
+sudo rm -rf /etc/ntp-docker
+
+# 3. 若配置了开机同步 service 则一并注销
+sudo systemctl stop ntp-sync.service 2>/dev/null
+sudo systemctl disable ntp-sync.service 2>/dev/null
+sudo rm -f /etc/systemd/system/ntp-sync.service /usr/local/bin/ntp-sync.sh
+sudo systemctl daemon-reload
+```
+
+#### ② 停止并清理 B 主机 Chrony 客户端
+```bash
+# 1. 停止并禁用 systemd 服务
+sudo systemctl stop chronyd chrony 2>/dev/null
+sudo systemctl disable chronyd chrony 2>/dev/null
+
+# 2. 查杀可能残留的孤儿进程
+sudo pkill -9 chronyd 2>/dev/null
+
+# 3. 恢复或清理配置文件
+for f in /etc/chrony/chrony.conf /etc/chrony.conf; do
+    if [ -f "$f" ]; then
+        bak=$(ls "${f}.bak"* 2>/dev/null | tail -1)
+        if [ -n "$bak" ]; then
+            sudo mv "$bak" "$f"
+            echo "已恢复备份配置: $f"
+        else
+            sudo rm -f "$f"
+        fi
+    fi
+done
+```
+
+---
+
+## 6. 核心避坑与故障排查速查表 (FAQ)
 
 ### Q1: B主机提示 `no server suitable for synchronization found`
 | 可能原因 | 排查与解决方案 |
@@ -559,3 +635,36 @@ server 192.168.1.100, stratum 2, offset 0.001245, delay 0.02612
   - 日志记录顺序错乱。
   - 监控系统触发异常告警。
 - **正解**：生产环境必须采用 **Chrony**，让时钟通过走快或走慢（Slew）平滑对齐。
+
+---
+
+### Q6: Ubuntu 22.04/24.04 或信创麒麟提示 `Unit chrony.service is masked` 或与 `systemd-timesyncd` 冲突
+- **根因**：
+  1. 系统在安装 Chrony 之前或之后，`chrony.service` 被系统软链接至 `/dev/null`（Masked 锁定状态）。
+  2. Ubuntu 等默认内置开启了 `systemd-timesyncd`，与 Chrony 共同尝试占有时钟管理。
+- **解决（工具箱已全自动自愈，手动命令如下）**：
+  ```bash
+  # 1. 解除 chrony 服务屏蔽锁定
+  sudo systemctl unmask chrony 2>/dev/null || true
+  sudo systemctl unmask chronyd 2>/dev/null || true
+
+  # 2. 停用并禁用冲突的 systemd-timesyncd
+  sudo systemctl stop systemd-timesyncd 2>/dev/null || true
+  sudo systemctl disable systemd-timesyncd 2>/dev/null || true
+
+  # 3. 重新加载并启动 chrony
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now chrony 2>/dev/null || sudo systemctl enable --now chronyd 2>/dev/null
+  ```
+
+---
+
+### Q7: 物理机/虚拟机冷重启后时间倒流或偏移巨大
+- **根因**：操作系统关机时未将内存中的系统时钟写入主板 CMOS/RTC 硬件芯片，开机后内核从残留的旧硬件时钟重新读秒。
+- **解决**：
+  1. 确保 Chrony 配置文件中已启用 `rtcsync`（工具箱已默认写入）。
+  2. 手动同步完成后，立即将当前系统时间同步固化至硬件芯片：
+     ```bash
+     sudo hwclock --systohc
+     sudo hwclock --show
+     ```
