@@ -711,18 +711,14 @@ EOF
                     echo -e "${GREEN}✓ 网络连通，开始采集离线包...${NC}"
                     echo ""
                     # 定位 download_offline_packages.sh
-                    local _dl_script=""
-                    for _d in "$BASE_DIR" "/opt/ck_sysinit" "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.."; do
-                        if [ -f "${_d}/download_offline_packages.sh" ]; then
-                            _dl_script="${_d}/download_offline_packages.sh"
-                            break
-                        fi
-                    done
+                    local _dl_script
+                    _dl_script=$(_find_dl_script)
                     if [ -n "$_dl_script" ]; then
                         bash "$_dl_script"
                     else
                         echo -e "${RED}✗ 未找到 download_offline_packages.sh${NC}"
-                        echo -e "  期望路径: ${CYAN}${BASE_DIR}/download_offline_packages.sh${NC}"
+                        echo -e "  搜索过: ${BASE_DIR:-未知} / /opt/ck_sysinit / 当前目录"
+                        echo -e "  ${YELLOW}[解决] 请重新安装工具箱完整同步最新版本。${NC}"
                     fi
                 else
                     echo -e "${RED}✗ 当前网络不可达，无法采集离线包！${NC}"
@@ -879,6 +875,36 @@ EOF
 # ========== 网络 IP 配置模块 ==========
 
 # ================================================================
+# 辅助: 定位 download_offline_packages.sh
+# 覆盖所有已知部署路径，返回首个找到的完整路径
+# ================================================================
+_find_dl_script() {
+    local _script_name="download_offline_packages.sh"
+    # 候选路径列表 (按优先级排序)
+    local _candidates=(
+        # 1. BASE_DIR 指向 system_init.sh 所在目录（最常见）
+        "${BASE_DIR:-}"
+        # 2. 标准安装路径 /opt/ck_sysinit
+        "/opt/ck_sysinit"
+        # 3. system_opt.sh 的父目录（system/modules/ -> system/）
+        "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")/.."
+        # 4. system_opt.sh 的同级目录（振错兼容）
+        "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")"
+        # 5. 当前工作目录子目录（开发阶段直运行时）
+        "$PWD/system"
+        "$PWD"
+    )
+    for _c in "${_candidates[@]}"; do
+        [ -z "$_c" ] && continue
+        if [ -f "${_c}/${_script_name}" ]; then
+            echo "${_c}/${_script_name}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# ================================================================
 # 辅助: 无依赖网络连通性探测
 # 优先用 Bash 内置 /dev/tcp (零依赖)，降级用 ping
 # 返回 0=有网  1=无网
@@ -973,18 +999,13 @@ install_common_tools() {
         echo -e "${CYAN}──────────────────────────────────────────────────────${NC}"
         read -p "  立即采集离线包? [y/N]: " _do_collect < /dev/tty
         if [[ "$_do_collect" =~ ^[Yy]$ ]]; then
-            local _dl_script=""
-            for _d in "$BASE_DIR" "/opt/ck_sysinit" "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.."; do
-                if [ -f "${_d}/download_offline_packages.sh" ]; then
-                    _dl_script="${_d}/download_offline_packages.sh"
-                    break
-                fi
-            done
+            local _dl_script
+            _dl_script=$(_find_dl_script)
             if [ -n "$_dl_script" ]; then
                 echo ""
                 bash "$_dl_script"
             else
-                echo -e "${RED}✗ 未找到 download_offline_packages.sh，请检查工具箱完整性。${NC}"
+                echo -e "${RED}✗ 未找到 download_offline_packages.sh，请重新安装工具箱完整同步。${NC}"
             fi
         fi
 

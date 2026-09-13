@@ -223,6 +223,12 @@ mkdir -p "$TARGET_OPT"
 echo -e "[2/3] 正在同步核心微服务文件与外挂模块引擎 ..."
 # 同步主程序及模块体系
 cp -rf "$SRC_DIR/system_init.sh" "$TARGET_OPT/"
+# 同步 system/ 目录下的独立工具脚本（离线包采集等）
+for sys_script in download_offline_packages.sh fetch_packages.py; do
+    if [ -f "$SRC_DIR/$sys_script" ]; then
+        cp -f "$SRC_DIR/$sys_script" "$TARGET_OPT/"
+    fi
+done
 if [ -d "$SRC_DIR/modules" ]; then
     cp -rf "$SRC_DIR/modules" "$TARGET_OPT/"
 fi
