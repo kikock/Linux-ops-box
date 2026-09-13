@@ -11,7 +11,7 @@
 #          CentOS / RHEL / Rocky / openEuler / Anolis OS
 # =================================================================
 
-set -e
+# set -e (已停用严格退出模式，避免单个非核心依赖下载失败导致整个脚本中断)
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -46,6 +46,15 @@ if command -v apt-get &>/dev/null; then
     apt-get update -y 2>/dev/null || true
     cd "$local_sub"
 
+    # 检查系统当前 APT 依赖健康度
+    if ! apt-get check &>/dev/null 2>&1; then
+        echo -e "${YELLOW}⚠️ 检测到当前系统存在未满足或损坏的依赖 (Broken Dependencies)${NC}"
+        echo -e "   可能原因: 软件源版本不匹配或上次升级中断。"
+        echo -e "   ${CYAN}已自动启用【纯下载隔离模式 (apt-get download)】，不依赖本机系统状态采集离线包。${NC}"
+        echo -e "   若需修复本机系统环境，可在终端执行: ${GREEN}apt --fix-broken install -y${NC}"
+        echo ""
+    fi
+
     # ── 基础工具 ────────────────────────────────────────────────────
     DEB_BASIC=(curl openssl lsof socat tar wget cron dnsutils nano vim htop net-tools unzip zip openssh-server)
     # ── 时间管理工具 (time_mgmt.sh 依赖) ────────────────────────────
@@ -64,21 +73,54 @@ if command -v apt-get &>/dev/null; then
 
     for pkg in "${DEB_LIST[@]}"; do
         echo -n "  ➜ 正在下载 ${pkg} (含依赖) ... "
-        # 使用 apt-get --download-only 自动解析并下载依赖树
-        # 若 --download-only 失败则退回 apt-get download（单包无依赖）
-        if apt-get install --download-only --reinstall -y "$pkg" &>/dev/null 2>&1; then
-            # apt-get install --download-only 会把包下在 /var/cache/apt/archives/
-            # 将所有新增的 .deb 移入当前目录（过滤掉已存在的同名文件）
-            find /var/cache/apt/archives/ -maxdepth 1 -name "*.deb" \
-                ! -name 'lock' 2>/dev/null | while read -r f; do
-                bn="$(basename "$f")"
-                [ ! -f "$bn" ] && cp -n "$f" . 2>/dev/null || true
-            done
-            echo -e "${GREEN}[成功+依赖]${NC}"
-        elif apt-get download "$pkg" &>/dev/null 2>&1; then
-            echo -e "${GREEN}[成功]${NC}"
+        local _dl_ok=false
+        local _dep_count=0
+
+        # 方式 1: 纯隔离下载 (使用 apt-cache depends 递归提取依赖链 + apt-get download 纯拉取)
+        # 优点: 零系统侵入，不校验本机已安装状态，即便当前系统处于 broken 状态也能顺利拉取
+        local _deps=()
+        if command -v apt-cache &>/dev/null; then
+            mapfile -t _deps < <(apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces "$pkg" 2>/dev/null | grep -E "^[a-zA-Z0-9]" | grep -v "^<" | sort -u)
+        fi
+
+        # 将主包和依赖包合并
+        local _all_targets=("$pkg")
+        [ ${#_deps[@]} -gt 0 ] && _all_targets+=("${_deps[@]}")
+
+        for p in "${_all_targets[@]}"; do
+            [ -z "$p" ] && continue
+            if ls "${p}"_*.deb &>/dev/null 2>&1; then
+                ((_dep_count++))
+                _dl_ok=true
+                continue
+            fi
+            if apt-get download "$p" &>/dev/null 2>&1; then
+                ((_dep_count++))
+                _dl_ok=true
+            fi
+        done
+
+        # 方式 2: 兜底使用 apt-get install --download-only (如果上面失败且系统正常)
+        if [ "$_dl_ok" = false ]; then
+            if apt-get install --download-only --reinstall -y "$pkg" &>/dev/null 2>&1; then
+                find /var/cache/apt/archives/ -maxdepth 1 -name "*.deb" \
+                    ! -name 'lock' 2>/dev/null | while read -r f; do
+                    bn="$(basename "$f")"
+                    [ ! -f "$bn" ] && cp -n "$f" . 2>/dev/null || true
+                done
+                _dl_ok=true
+            fi
+        fi
+
+        if [ "$_dl_ok" = true ]; then
+            echo -e "${GREEN}[成功, 共 ${_dep_count} 个包]${NC}"
         else
-            echo -e "${YELLOW}[跳过/未找到]${NC}"
+            # 单包直接下载重试
+            if apt-get download "$pkg" &>/dev/null 2>&1; then
+                echo -e "${GREEN}[成功(单包)]${NC}"
+            else
+                echo -e "${YELLOW}[跳过/仓库未收录]${NC}"
+            fi
         fi
     done
     cd - >/dev/null
