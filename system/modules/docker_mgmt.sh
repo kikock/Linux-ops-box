@@ -510,6 +510,15 @@ _docker_install_via_repo() {
             echo -e "${RED}不支持的发行版: $LSB_DIST，请使用静态编译模式。${NC}"
             return 1 ;;
     esac
+    # WSL 环境特殊适配: 切换为 iptables-legacy，避免 nftables 导致 dockerd 网络链启动失败
+    if grep -qi "microsoft" /proc/version 2>/dev/null; then
+        echo -e "${YELLOW}>> 检测到 WSL 环境，正在检查 iptables 兼容性...${NC}"
+        if command -v update-alternatives &>/dev/null; then
+            update-alternatives --set iptables /usr/sbin/iptables-legacy 2>/dev/null || true
+            update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy 2>/dev/null || true
+        fi
+    fi
+
     systemctl daemon-reload
     systemctl enable --now docker
     local dv=$(docker -v 2>/dev/null || echo "读取失败")
