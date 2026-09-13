@@ -68,7 +68,10 @@ manage_mirror_sources() {
             . /etc/os-release
             local id_lower
             id_lower=$(echo "${ID:-unknown}" | tr '[:upper:]' '[:lower:]')
-            local ver="${VERSION_CODENAME:-${UBUNTU_CODENAME:-}}"
+            local ver="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
+            if [[ "$id_lower" == "ubuntu" ]] && [ -z "$ver" ] && command -v lsb_release &>/dev/null; then
+                ver="$(lsb_release -cs 2>/dev/null)"
+            fi
             # 无 codename 时取主版本号
             [ -z "$ver" ] && ver="${VERSION_ID%%.*}"
 

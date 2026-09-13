@@ -775,9 +775,48 @@ manage_ssh_service() {
                     local _pkg_name="openssh-server"
                     if command -v apt &>/dev/null; then
                         _pkg_cmd="apt"
+                        # ── 智能版本代号校验与自愈 ─────────────────────────────────
+                        if [ -f /etc/os-release ]; then
+                            . /etc/os-release
+                            local _real_codename="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
+                            if [ "$ID" = "ubuntu" ] && [ -n "$_real_codename" ]; then
+                                # 检查源文件中是否混入了其他发行版代号
+                                local _wrong_codes=""
+                                _wrong_codes=$(grep -rohE "noble|jammy|focal|bionic" /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null | grep -v "^${_real_codename}$" | sort -u | tr '\n' ' ')
+                                if [ -n "$_wrong_codes" ]; then
+                                    echo -e "${RED}⚠️ 检测到软件源版本代号严重错位！${NC}"
+                                    echo -e "   当前系统真实版本: ${GREEN}${PRETTY_NAME:-Ubuntu} (${_real_codename})${NC}"
+                                    echo -e "   源文件中检测到的错误代号: ${RED}${_wrong_codes}${NC}"
+                                    echo -e "   ${YELLOW}原因: 系统为 22.04 (${_real_codename})，但源被误配为 24.04 (${_wrong_codes})，导致底层依赖严重冲突。${NC}"
+                                    read -p "   是否立即自动纠正软件源为 [${_real_codename}] 并修复依赖？[Y/n]: " _do_heal < /dev/tty
+                                    if [[ -z "$_do_heal" || "$_do_heal" =~ ^[Yy]$ ]]; then
+                                        echo -e "${YELLOW}⏳ 正在自动纠正所有源配置至 ${_real_codename}...${NC}"
+                                        sed -i "s/noble/${_real_codename}/g; s/focal/${_real_codename}/g; s/bionic/${_real_codename}/g" /etc/apt/sources.list 2>/dev/null || true
+                                        find /etc/apt/sources.list.d/ -type f \( -name "*.list" -o -name "*.sources" \) -exec sed -i "s/noble/${_real_codename}/g; s/focal/${_real_codename}/g; s/bionic/${_real_codename}/g" {} + 2>/dev/null || true
+                                        echo -e "${YELLOW}⏳ 清理旧索引缓存并重新同步...${NC}"
+                                        rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+                                        apt-get update -y
+                                        echo -e "${YELLOW}⏳ 正在执行 apt --fix-broken install 修复依赖状态...${NC}"
+                                        apt-get --fix-broken install -y
+                                        echo -e "${GREEN}✅ 软件源与依赖已成功自愈！${NC}"
+                                        echo ""
+                                    fi
+                                fi
+                            fi
+                        fi
+
                         echo -e "${YELLOW}⏳ 执行: apt update && apt install -y openssh-server...${NC}"
                         apt update -y 2>/dev/null || true
                         apt install -y openssh-server
+                        local _apt_rc=$?
+
+                        # 如果安装依然遇到 broken 状态，主动提供修复
+                        if [ $_apt_rc -ne 0 ] && ! apt-get check &>/dev/null 2>&1; then
+                            echo -e "\n${YELLOW}⚠️ 检测到当前系统依赖处于损坏状态，正在尝试自动修复: apt --fix-broken install...${NC}"
+                            apt-get --fix-broken install -y
+                            echo -e "${YELLOW}⏳ 重新尝试安装 openssh-server...${NC}"
+                            apt install -y openssh-server
+                        fi
                     elif command -v dnf &>/dev/null; then
                         _pkg_cmd="dnf"
                         echo -e "${YELLOW}⏳ 执行: dnf install -y openssh-server openssh-clients...${NC}"
