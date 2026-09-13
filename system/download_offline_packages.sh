@@ -3,8 +3,10 @@
 # =================================================================
 # 脚本名称: download_offline_packages.sh
 # 适用环境: 【有互联网连接的 Linux 电脑】
-# 描述: 自动下载 curl, openssl, lsof, socat, tar, wget, cron, dig, nano
-#       等常用工具的离线安装包 (.deb / .rpm) 到 system/packages 目录
+# 描述: 自动下载常用工具离线安装包 (.deb / .rpm) 到 system/packages 目录
+#       覆盖范围:
+#         [基础工具] curl, openssl, lsof, socat, tar, wget, cron, dig, nano, vim
+#         [时间管理] chrony, ntpdate, ntp(含ntpq), util-linux(hwclock), tzdata
 # 适配: Ubuntu / Debian / 银河麒麟 / 统信 UOS / Deepin /
 #          CentOS / RHEL / Rocky / openEuler / Anolis OS
 # =================================================================
@@ -43,13 +45,37 @@ if command -v apt-get &>/dev/null; then
     echo -e "⏳ 正在更新软件索引并下载 .deb 离线包到: ${CYAN}${local_sub}${NC} ..."
     apt-get update -y 2>/dev/null || true
     cd "$local_sub"
-    
-    DEB_LIST=(curl openssl lsof socat tar wget cron dnsutils nano vim htop net-tools unzip zip chrony ntpdate)
-    echo -e "下载目标: ${YELLOW}${DEB_LIST[*]}${NC}"
-    
+
+    # ── 基础工具 ────────────────────────────────────────────────────
+    DEB_BASIC=(curl openssl lsof socat tar wget cron dnsutils nano vim htop net-tools unzip zip)
+    # ── 时间管理工具 (time_mgmt.sh 依赖) ────────────────────────────
+    # chrony   : chronyc 命令 (现代 NTP 守护进程)
+    # ntpdate  : 手动单次同步
+    # ntp      : ntpq 状态查询工具
+    # util-linux: hwclock 硬件时钟读写
+    # tzdata   : 时区数据库 (date 时区切换依赖)
+    DEB_TIME=(chrony ntpdate ntp util-linux tzdata)
+    DEB_LIST=("${DEB_BASIC[@]}" "${DEB_TIME[@]}")
+
+    echo -e "下载目标:"
+    echo -e "  ${CYAN}[基础工具]${NC} ${DEB_BASIC[*]}"
+    echo -e "  ${CYAN}[时间管理]${NC} ${DEB_TIME[*]}"
+    echo ""
+
     for pkg in "${DEB_LIST[@]}"; do
-        echo -n "  ➜ 正在下载 ${pkg} ... "
-        if apt-get download "$pkg" &>/dev/null; then
+        echo -n "  ➜ 正在下载 ${pkg} (含依赖) ... "
+        # 使用 apt-get --download-only 自动解析并下载依赖树
+        # 若 --download-only 失败则退回 apt-get download（单包无依赖）
+        if apt-get install --download-only --reinstall -y "$pkg" &>/dev/null 2>&1; then
+            # apt-get install --download-only 会把包下在 /var/cache/apt/archives/
+            # 将所有新增的 .deb 移入当前目录（过滤掉已存在的同名文件）
+            find /var/cache/apt/archives/ -maxdepth 1 -name "*.deb" \
+                ! -name 'lock' 2>/dev/null | while read -r f; do
+                bn="$(basename "$f")"
+                [ ! -f "$bn" ] && cp -n "$f" . 2>/dev/null || true
+            done
+            echo -e "${GREEN}[成功+依赖]${NC}"
+        elif apt-get download "$pkg" &>/dev/null 2>&1; then
             echo -e "${GREEN}[成功]${NC}"
         else
             echo -e "${YELLOW}[跳过/未找到]${NC}"
@@ -68,10 +94,22 @@ elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
         *)                        echo -e "${GREEN}检测到 CentOS/RHEL/Rocky/Alma (YUM/DNF) 环境${NC}" ;;
     esac
     echo -e "⏳ 正在下载 .rpm 离线包到: ${CYAN}${local_sub}${NC} ..."
-    
-    RPM_LIST=(curl openssl lsof socat tar wget cronie bind-utils nano vim-enhanced htop net-tools unzip zip chrony ntpdate)
-    echo -e "下载目标: ${YELLOW}${RPM_LIST[*]}${NC}"
-    
+
+    # ── 基础工具 ────────────────────────────────────────────────────
+    RPM_BASIC=(curl openssl lsof socat tar wget cronie bind-utils nano vim-enhanced htop net-tools unzip zip)
+    # ── 时间管理工具 (time_mgmt.sh 依赖) ────────────────────────────
+    # chrony   : chronyc (现代 NTP 守护进程)
+    # ntp      : ntpdate + ntpq (注: RHEL 8+ 上游已废弃 ntpdate 独立包)
+    # util-linux: hwclock 硬件时钟读写
+    # tzdata   : 时区数据库
+    RPM_TIME=(chrony ntp util-linux tzdata)
+    RPM_LIST=("${RPM_BASIC[@]}" "${RPM_TIME[@]}")
+
+    echo -e "下载目标:"
+    echo -e "  ${CYAN}[基础工具]${NC} ${RPM_BASIC[*]}"
+    echo -e "  ${CYAN}[时间管理]${NC} ${RPM_TIME[*]}"
+    echo ""
+
     if command -v dnf &>/dev/null; then
         dnf download --destdir="$local_sub" --resolve "${RPM_LIST[@]}" 2>/dev/null || true
     elif command -v yumdownloader &>/dev/null; then

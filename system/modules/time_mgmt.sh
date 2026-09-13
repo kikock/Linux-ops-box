@@ -156,22 +156,32 @@ _install_ntp_tools() {
 
     local offline_chrony=""
     local offline_ntpdate=""
+    local offline_ntp=""         # 含 ntpq 工具
+    local offline_util_linux=""  # 含 hwclock
     local has_offline=false
 
     if [ "$pkg_mgr_type" = "debian" ]; then
         offline_chrony=$(find "${base_pkg_dir}/deb" -name "chrony*.deb" 2>/dev/null | head -1)
         offline_ntpdate=$(find "${base_pkg_dir}/deb" -name "ntpdate*.deb" 2>/dev/null | head -1)
-        [ -n "$offline_chrony" ] || [ -n "$offline_ntpdate" ] && has_offline=true
+        offline_ntp=$(find "${base_pkg_dir}/deb" -name "ntp_*.deb" 2>/dev/null | head -1)
+        offline_util_linux=$(find "${base_pkg_dir}/deb" -name "util-linux*.deb" 2>/dev/null | head -1)
+        [ -n "$offline_chrony" ] || [ -n "$offline_ntpdate" ] || \
+        [ -n "$offline_ntp" ]    && has_offline=true
     elif [ "$pkg_mgr_type" = "rhel" ]; then
         offline_chrony=$(find "${base_pkg_dir}/rpm" -name "chrony*.rpm" 2>/dev/null | head -1)
         offline_ntpdate=$(find "${base_pkg_dir}/rpm" -name "ntpdate*.rpm" 2>/dev/null | head -1)
-        [ -n "$offline_chrony" ] || [ -n "$offline_ntpdate" ] && has_offline=true
+        offline_ntp=$(find "${base_pkg_dir}/rpm" -name "ntp-[0-9]*.rpm" 2>/dev/null | head -1)
+        offline_util_linux=$(find "${base_pkg_dir}/rpm" -name "util-linux*.rpm" 2>/dev/null | head -1)
+        [ -n "$offline_chrony" ] || [ -n "$offline_ntpdate" ] || \
+        [ -n "$offline_ntp" ]    && has_offline=true
     fi
 
     if [ "$has_offline" = true ]; then
         echo -e "${GREEN}📦 检测到仓库内置离线包 (system/packages):${NC}"
-        [ -n "$offline_chrony" ] && echo -e "  - chrony 离线包 : ${CYAN}$(basename "$offline_chrony")${NC}"
-        [ -n "$offline_ntpdate" ] && echo -e "  - ntpdate 离线包: ${CYAN}$(basename "$offline_ntpdate")${NC}"
+        [ -n "$offline_chrony" ]     && echo -e "  - chrony 离线包    : ${CYAN}$(basename "$offline_chrony")${NC}"
+        [ -n "$offline_ntpdate" ]    && echo -e "  - ntpdate 离线包   : ${CYAN}$(basename "$offline_ntpdate")${NC}"
+        [ -n "$offline_ntp" ]        && echo -e "  - ntp(含ntpq) 离线包: ${CYAN}$(basename "$offline_ntp")${NC}"
+        [ -n "$offline_util_linux" ] && echo -e "  - util-linux 离线包 : ${CYAN}$(basename "$offline_util_linux")${NC} (hwclock)"
         echo ""
     fi
 
@@ -271,26 +281,42 @@ _install_ntp_tools() {
             systemctl stop ntp ntpd 2>/dev/null || true
             if [ "$pkg_mgr_type" = "debian" ]; then
                 local debs=()
-                [ -n "$offline_chrony" ] && debs+=("$offline_chrony")
-                [ -n "$offline_ntpdate" ] && debs+=("$offline_ntpdate")
+                [ -n "$offline_chrony" ]     && debs+=("$offline_chrony")
+                [ -n "$offline_ntpdate" ]    && debs+=("$offline_ntpdate")
+                [ -n "$offline_ntp" ]        && debs+=("$offline_ntp")
+                [ -n "$offline_util_linux" ] && debs+=("$offline_util_linux")
                 if [ ${#debs[@]} -gt 0 ]; then
+                    echo -e "  ${CYAN}安装包清单:${NC}"
+                    for deb in "${debs[@]}"; do
+                        echo -e "    - $(basename "$deb")"
+                    done
+                    echo ""
                     dpkg -i "${debs[@]}" 2>/dev/null || apt-get install -f -y 2>/dev/null || true
                     systemctl enable --now chrony 2>/dev/null || true
                     echo -e "  ${GREEN}✓ Debian/Ubuntu 离线包安装执行完毕${NC}"
                 else
                     echo -e "  ${RED}✗ 未找到 Debian 体系的离线安装包${NC}"
+                    echo -e "  ${YELLOW}提示: 请先在有网机器执行【download_offline_packages.sh】正确下载离线包${NC}"
                 fi
             elif [ "$pkg_mgr_type" = "rhel" ]; then
                 local rpms=()
-                [ -n "$offline_chrony" ] && rpms+=("$offline_chrony")
-                [ -n "$offline_ntpdate" ] && rpms+=("$offline_ntpdate")
+                [ -n "$offline_chrony" ]     && rpms+=("$offline_chrony")
+                [ -n "$offline_ntpdate" ]    && rpms+=("$offline_ntpdate")
+                [ -n "$offline_ntp" ]        && rpms+=("$offline_ntp")
+                [ -n "$offline_util_linux" ] && rpms+=("$offline_util_linux")
                 if [ ${#rpms[@]} -gt 0 ]; then
+                    echo -e "  ${CYAN}安装包清单:${NC}"
+                    for rpm in "${rpms[@]}"; do
+                        echo -e "    - $(basename "$rpm")"
+                    done
+                    echo ""
                     rpm -Uvh --replacepkgs --nodeps "${rpms[@]}" 2>/dev/null || \
                         yum localinstall -y "${rpms[@]}" 2>/dev/null || true
                     systemctl enable --now chronyd 2>/dev/null || true
                     echo -e "  ${GREEN}✓ RHEL/CentOS/麒麟 离线包安装执行完毕${NC}"
                 else
                     echo -e "  ${RED}✗ 未找到 RPM 体系的离线安装包${NC}"
+                    echo -e "  ${YELLOW}提示: 请先在有网机器执行【download_offline_packages.sh】正确下载离线包${NC}"
                 fi
             fi
             ;;
@@ -312,6 +338,9 @@ _install_ntp_tools() {
     command -v chronyc &>/dev/null && \
         echo -e "  ${GREEN}✓ chronyc  : $(chronyc --version 2>&1 | head -1)${NC}" || \
         echo -e "  ${YELLOW}⚠ chronyc  : 未安装${NC}"
+    command -v hwclock &>/dev/null && \
+        echo -e "  ${GREEN}✓ hwclock  : 可用 (util-linux)${NC}" || \
+        echo -e "  ${YELLOW}⚠ hwclock  : 未安装 (util-linux 离线包需重新下载)${NC}"
 
     echo ""
     read -p "  按回车键返回..." -r < /dev/tty

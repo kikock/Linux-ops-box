@@ -608,9 +608,10 @@ system_optimization_menu() {
         echo -e " 6. 获取硬盘信息并交互式挂载"
         echo -e " 7. 配置终端网络代理 (临时/全局直连)"
         echo -e " 8. 修复中文乱码 (locale/字体/编码一键修复)"
+        echo -e " ${CYAN}9. 📦 采集离线安装包到本地 (需联网, 供无网服务器使用)${NC}"
         echo -e " 0. 返回主菜单"
         echo -e "${GREEN}==============================================${NC}"
-        read -p "请选择操作 [0-8]: " opt_choice
+        read -p "请选择操作 [0-9]: " opt_choice
 
         case $opt_choice in
             1)
@@ -696,12 +697,46 @@ EOF
             8)
                 fix_chinese_locale
                 ;;
+            9)
+                # ── 采集离线安装包（需要网络）──────────────────────────────
+                echo ""
+                echo -e "${CYAN}======================================================${NC}"
+                echo -e "${CYAN}      📦 采集离线安装包到本地 (system/packages)       ${NC}"
+                echo -e "${CYAN}======================================================${NC}"
+                echo -e "${BLUE}说明: 本操作需要在【有网络】的机器上执行，"  
+                echo -e "  下载的离线包可随工具箱一起拷贝至无网服务器使用。${NC}"
+                echo ""
+                # 先检测网络
+                if _check_net_available; then
+                    echo -e "${GREEN}✓ 网络连通，开始采集离线包...${NC}"
+                    echo ""
+                    # 定位 download_offline_packages.sh
+                    local _dl_script=""
+                    for _d in "$BASE_DIR" "/opt/ck_sysinit" "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.."; do
+                        if [ -f "${_d}/download_offline_packages.sh" ]; then
+                            _dl_script="${_d}/download_offline_packages.sh"
+                            break
+                        fi
+                    done
+                    if [ -n "$_dl_script" ]; then
+                        bash "$_dl_script"
+                    else
+                        echo -e "${RED}✗ 未找到 download_offline_packages.sh${NC}"
+                        echo -e "  期望路径: ${CYAN}${BASE_DIR}/download_offline_packages.sh${NC}"
+                    fi
+                else
+                    echo -e "${RED}✗ 当前网络不可达，无法采集离线包！${NC}"
+                    echo -e "  ${YELLOW}请在有网络的同型号/同架构机器上执行此操作。${NC}"
+                fi
+                echo ""
+                read -p "  按回车键返回..." -r < /dev/tty
+                ;;
             0)
                 echo -e "${BLUE}返回中...${NC}"
                 break
                 ;;
             *)
-                echo -e "${RED}输入有误，请输入 0-8 之间的数字。${NC}"
+                echo -e "${RED}输入有误，请输入 0-9 之间的数字。${NC}"
                 sleep 1
                 ;;
         esac
@@ -843,59 +878,57 @@ EOF
 
 # ========== 网络 IP 配置模块 ==========
 
-# 查看当前网络信息
-# 常用基础系统组件安装 (支持离线本地包安装与在线适配)
+# ================================================================
+# 辅助: 无依赖网络连通性探测
+# 优先用 Bash 内置 /dev/tcp (零依赖)，降级用 ping
+# 返回 0=有网  1=无网
+# ================================================================
+_check_net_available() {
+    local timeout=3
+    # 方法 1: Bash /dev/tcp 探测 1.1.1.1:80（Cloudflare，无需 DNS）
+    if (exec 9<>/dev/tcp/1.1.1.1/80) 2>/dev/null; then
+        exec 9>&- 2>/dev/null
+        return 0
+    fi
+    # 方法 2: /dev/tcp 探测 8.8.8.8:53（Google DNS）
+    if (exec 9<>/dev/tcp/8.8.8.8/53) 2>/dev/null; then
+        exec 9>&- 2>/dev/null
+        return 0
+    fi
+    # 方法 3: ping 降级兜底
+    if ping -c1 -W${timeout} 1.1.1.1 &>/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
+# ================================================================
+# 常用基础系统组件安装
+# 优先级: 有网 → 在线安装 → 询问是否顺便采集离线包
+#         无网 → 使用本地 packages/ 离线包
+# ================================================================
 install_common_tools() {
     clear
     echo -e "${CYAN}======================================================${NC}"
     echo -e "${CYAN}      🛠  常用专家基础系统组件安装 / 离线部署         ${NC}"
     echo -e "${CYAN}======================================================${NC}"
-    echo -e "当前系统类型: ${GREEN}${DISTRO_NAME:-未知}${NC} (包管理器: ${CYAN}${PKG_MGR:-未知}${NC})\n"
+    echo -e "当前系统类型: ${GREEN}${DISTRO_NAME:-未知}${NC} (包管理器: ${CYAN}${PKG_MGR:-未知}${NC})"
+    echo ""
 
-    # 1. 检测本地 packages 目录是否存在离线包 (支持 deb / rpm 分类与平铺结构)
-    local pkg_dir=""
-    for d in "$BASE_DIR/packages" "/opt/ck_sysinit/packages" "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../packages" "$PWD/system/packages"; do
-        if [ -d "$d" ]; then
-            pkg_dir="$d"
-            break
-        fi
-    done
-
-    local has_local_pkg=false
-    if [ -n "$pkg_dir" ]; then
-        if command -v dpkg &>/dev/null; then
-            local deb_source=""
-            if [ -d "$pkg_dir/deb" ] && ls "$pkg_dir/deb"/*.deb &>/dev/null; then
-                deb_source="$pkg_dir/deb"
-            elif ls "$pkg_dir"/*.deb &>/dev/null; then
-                deb_source="$pkg_dir"
-            fi
-            if [ -n "$deb_source" ]; then
-                has_local_pkg=true
-                echo -e "${GREEN}✓ 发现本地 deb 离线安装包目录: ${deb_source}${NC}"
-                echo -e "⏳ 正在执行 dpkg -i 离线批量安装..."
-                dpkg -i "$deb_source"/*.deb 2>/dev/null || apt-get install -f -y 2>/dev/null || true
-                echo -e "${GREEN}✅ 离线 deb 组件安装/升级完成！${NC}"
-            fi
-        elif command -v rpm &>/dev/null; then
-            local rpm_source=""
-            if [ -d "$pkg_dir/rpm" ] && ls "$pkg_dir/rpm"/*.rpm &>/dev/null; then
-                rpm_source="$pkg_dir/rpm"
-            elif ls "$pkg_dir"/*.rpm &>/dev/null; then
-                rpm_source="$pkg_dir"
-            fi
-            if [ -n "$rpm_source" ]; then
-                has_local_pkg=true
-                echo -e "${GREEN}✓ 发现本地 rpm 离线安装包目录: ${rpm_source}${NC}"
-                echo -e "⏳ 正在执行 rpm 离线批量安装..."
-                rpm -Uvh --replacepkgs --nodeps "$rpm_source"/*.rpm 2>/dev/null || true
-                echo -e "${GREEN}✅ 离线 rpm 组件安装/升级完成！${NC}"
-            fi
-        fi
+    # ── 步骤 1: 网络探测 ──────────────────────────────────────────
+    echo -ne "${BLUE}[1/3] 正在探测网络连通性...${NC} "
+    local net_ok=false
+    if _check_net_available; then
+        net_ok=true
+        echo -e "${GREEN}✓ 网络可达${NC}"
+    else
+        echo -e "${RED}✗ 网络不可达（离线环境）${NC}"
     fi
+    echo ""
 
-    if [ "$has_local_pkg" = false ]; then
-        echo -e "${YELLOW}未检测到本地离线包，正在尝试通过网络包管理器在线安装...${NC}"
+    # ── 步骤 2: 有网 → 在线安装 ──────────────────────────────────
+    if [ "$net_ok" = true ]; then
+        echo -e "${BLUE}[2/3] 网络安装模式 — 通过包管理器在线安装工具...${NC}"
         local PACKAGES=""
         case "$PKG_MGR" in
             apt)
@@ -909,27 +942,117 @@ install_common_tools() {
                 ;;
             *)
                 echo -e "${RED}错误: 未能识别当前包管理器，无法进行在线安装。${NC}"
-                read -p "按回车键返回..."
+                read -p "按回车键返回..." < /dev/tty
                 return
                 ;;
         esac
 
-        echo -e "组件清单: ${GREEN}${PACKAGES}${NC}\n"
+        echo -e "组件清单: ${GREEN}${PACKAGES}${NC}"
+        echo ""
         if [ "$PKG_MGR" = "apt" ]; then
+            echo -e "${YELLOW}⏳ 正在更新软件源索引...${NC}"
             apt update -y 2>/dev/null || true
+            echo ""
         fi
 
         $PKG_INSTALL $PACKAGES
-        if [ $? -eq 0 ]; then
-            echo -e "\n${GREEN}✅ 所有常用基础软件在线安装/检查完毕。${NC}"
+        local install_exit=$?
+        echo ""
+        if [ $install_exit -eq 0 ]; then
+            echo -e "${GREEN}✅ 所有常用基础软件在线安装/检查完毕。${NC}"
         else
-            echo -e "\n${YELLOW}⚠️ 在线安装结束（若处于离线断网环境属正常现象）。${NC}"
+            echo -e "${YELLOW}⚠️ 在线安装结束，部分软件包可能未成功安装（请检查软件源配置）。${NC}"
+        fi
+
+        # 在线安装完成后，询问是否顺便采集离线包备用
+        echo ""
+        echo -e "${CYAN}──────────────────────────────────────────────────────${NC}"
+        echo -e "${YELLOW}💡 当前有网络，是否顺便采集离线安装包？${NC}"
+        echo -e "   采集后可将 packages/ 目录拷贝至无网服务器使用"
+        echo -e "   (系统环境优化菜单 → 9. 采集离线安装包)"
+        echo -e "${CYAN}──────────────────────────────────────────────────────${NC}"
+        read -p "  立即采集离线包? [y/N]: " _do_collect < /dev/tty
+        if [[ "$_do_collect" =~ ^[Yy]$ ]]; then
+            local _dl_script=""
+            for _d in "$BASE_DIR" "/opt/ck_sysinit" "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.."; do
+                if [ -f "${_d}/download_offline_packages.sh" ]; then
+                    _dl_script="${_d}/download_offline_packages.sh"
+                    break
+                fi
+            done
+            if [ -n "$_dl_script" ]; then
+                echo ""
+                bash "$_dl_script"
+            else
+                echo -e "${RED}✗ 未找到 download_offline_packages.sh，请检查工具箱完整性。${NC}"
+            fi
+        fi
+
+    else
+        # ── 步骤 2: 无网 → 离线包安装 ────────────────────────────
+        echo -e "${BLUE}[2/3] 离线安装模式 — 搜索本地 packages/ 目录...${NC}"
+        local pkg_dir=""
+        for d in "$BASE_DIR/packages" "/opt/ck_sysinit/packages" \
+                 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../packages" \
+                 "$PWD/system/packages"; do
+            if [ -d "$d" ]; then
+                pkg_dir="$d"
+                break
+            fi
+        done
+
+        local has_local_pkg=false
+        if [ -n "$pkg_dir" ]; then
+            if command -v dpkg &>/dev/null; then
+                local deb_source=""
+                if   [ -d "$pkg_dir/deb" ] && ls "$pkg_dir/deb"/*.deb &>/dev/null 2>&1; then
+                    deb_source="$pkg_dir/deb"
+                elif ls "$pkg_dir"/*.deb &>/dev/null 2>&1; then
+                    deb_source="$pkg_dir"
+                fi
+                if [ -n "$deb_source" ]; then
+                    has_local_pkg=true
+                    local deb_count
+                    deb_count=$(ls "$deb_source"/*.deb 2>/dev/null | wc -l)
+                    echo -e "${GREEN}✓ 发现本地 deb 离线安装包: ${CYAN}${deb_source}${NC} (共 ${deb_count} 个)"
+                    echo -e "⏳ 正在执行 dpkg -i 离线批量安装..."
+                    dpkg -i "$deb_source"/*.deb 2>/dev/null || apt-get install -f -y 2>/dev/null || true
+                    echo -e "${GREEN}✅ 离线 deb 组件安装/升级完成！${NC}"
+                fi
+            elif command -v rpm &>/dev/null; then
+                local rpm_source=""
+                if   [ -d "$pkg_dir/rpm" ] && ls "$pkg_dir/rpm"/*.rpm &>/dev/null 2>&1; then
+                    rpm_source="$pkg_dir/rpm"
+                elif ls "$pkg_dir"/*.rpm &>/dev/null 2>&1; then
+                    rpm_source="$pkg_dir"
+                fi
+                if [ -n "$rpm_source" ]; then
+                    has_local_pkg=true
+                    local rpm_count
+                    rpm_count=$(ls "$rpm_source"/*.rpm 2>/dev/null | wc -l)
+                    echo -e "${GREEN}✓ 发现本地 rpm 离线安装包: ${CYAN}${rpm_source}${NC} (共 ${rpm_count} 个)"
+                    echo -e "⏳ 正在执行 rpm 离线批量安装..."
+                    rpm -Uvh --replacepkgs --nodeps "$rpm_source"/*.rpm 2>/dev/null || true
+                    echo -e "${GREEN}✅ 离线 rpm 组件安装/升级完成！${NC}"
+                fi
+            fi
+        fi
+
+        if [ "$has_local_pkg" = false ]; then
+            echo -e "${RED}✗ 未找到任何本地离线安装包！${NC}"
+            echo ""
+            echo -e "${YELLOW}📋 解决方法：${NC}"
+            echo -e "  1. 在【有网络】的同型号/同架构机器上运行此工具箱"
+            echo -e "  2. 进入 [系统环境优化 → 9. 采集离线安装包] 完成采集"
+            echo -e "  3. 将整个工具箱目录（含 packages/）拷贝回本机"
+            echo -e "  4. 重新运行此安装项即可"
         fi
     fi
 
+    # ── 步骤 3: 状态自检 ──────────────────────────────────────────
     echo ""
     echo -e "${CYAN}======================================================${NC}"
-    echo -e "${GREEN}常用命令状态自检:${NC}"
+    echo -e "${GREEN}[3/3] 常用命令状态自检:${NC}"
     for cmd in curl openssl lsof socat tar wget crontab dig nano vim; do
         if command -v "$cmd" &>/dev/null; then
             printf "  %-12s: ${GREEN}[已就绪]${NC}\n" "$cmd"
@@ -938,5 +1061,5 @@ install_common_tools() {
         fi
     done
     echo -e "${CYAN}======================================================${NC}"
-    read -p "按回车键返回主菜单..."
+    read -p "按回车键返回主菜单..." < /dev/tty
 }
