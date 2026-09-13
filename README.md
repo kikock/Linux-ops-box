@@ -31,17 +31,18 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 | 1 | **系统软件包更新** | 依赖清理 / 内核升级 | `system_opt.sh` |
 | 2 | **系统环境深度优化** | 换源 / BBR / Swap / 时区 | `system_opt.sh` |
 | 3 | **常用专家工具集** | 最小化系统必备工具安装 | `system_opt.sh` |
-| 4 | **SSH 远程安全加固** | 证书登录 / 端口自定义 / 防爆破 | `ssh_sec.sh` |
+| 4 | **SSH 远程安全加固** | 证书登录 / 端口自定义 / 防爆破 / 服务状态监控 / 一键重启与安装 | `ssh_sec.sh` |
 | 5 | **防火墙安全管理** | UFW / FirewallD TUI 管理 | `firewall_mgmt.sh` |
 | 6 | **网络 IP 与网卡诊断** | 静态 IP / 路由 / 网卡信息 | `network.sh` |
 | 7 | **系统资源与服务监控** | 进程 / Nginx 状态 / 磁盘 IO | `nginx_view.sh` |
-| 8 | **数据库管理中心** | 备份/恢复/连接管理/定时备份/数据表归档 (详见 §5) | `db_mgmt_loader.sh` |
+| 8 | **数据库管理中心** | 备份/恢复/连接管理/定时备份/数据表归档 (详见 §6) | `db_mgmt_loader.sh` |
 | 9 | **Docker 管理中心** | 安装/服务管理/Compose 编排 | `docker_mgmt.sh` |
 | 10 | **VNC 服务管理中心** | 一键安装 VNC / 桌面自启动 / 多端口多账户 | `vnc_mgmt.sh` |
 | 11 | **服务器代理配置** | Hosts 代理加速 / 环境变量代理 / Docker 镜像与信任 | `setup_proxy_registry.sh` |
 | 12 | **SSL/TLS 证书管理中心** | ACME 联网商业证书申请 / 离线自签证书体系 / 私有根 CA | `ssl_cert.sh` / `acme.sh` |
 | 13 | **硬盘检测与清理中心** | 磁盘使用率 / 大文件 / 大目录 / 智能清理辅助 | `disk_mgmt.sh` |
-| 88 | **在线更新工具箱** | 自动探测最优下载通道并云端覆写 | 内置 |
+| 14 | **系统时间管理中心** | RTC硬件时钟 / NTP服务器搭建 / 多源对齐 / 开机同步 (详见 §7) | `time_mgmt.sh` |
+| 88 | **在线更新工具箱** | 智能探测最优加速通道 (支持5大源测速) 并云端热覆写 | 内置 |
 | 99 | **卸载工具箱** | 清理软链接与守护目录 | 内置 |
 | 0 | **退出工具箱** | 退出管理程序 | 内置 |
 
@@ -50,9 +51,11 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 | 模块文件 | 职能描述 |
 |:---|:---|
 | `common.sh` | 全局底座：颜色规范、双写审计日志 (`/var/log/ck_system_init.log`)、跨平台发行版自检 `_init_distro()` |
+| `time_mgmt.sh` | 系统时间管理中心：硬件时钟 (RTC/hwclock) 读写与校准、Docker NTP 服务器 (cturra/ntp) 一键部署、纯 Bash UDP 123 零依赖健康探测、Chrony/ntpdate 客户端配置与开机自启、时钟漂移综合诊断 |
 | `ssl_cert.sh` | SSL/TLS 证书管理中心：融合 ACME 联网申请与离线自签、专家级 SAN (IP/多域名/通配符)、私有根 CA 签发、PFX/PEM 格式互转、密钥对配对诊断 |
 | `acme.sh` | ACME 证书自动化引擎：支持 Let's Encrypt / ZeroSSL、IP 证书、80 端口单域名与 DNS API 泛域名申请及自动续期 |
 | `disk_mgmt.sh` | 硬盘检测与清理中心模块：多挂载点使用率图示、Top N 大文件/大目录扫描、分类占用统计与一键清理 |
+| `ssh_sec.sh` | SSH 远程安全加固与服务管理：证书密钥免密登录、安全端口变更、防爆破扫描、服务运行状态诊断、守护进程开机自启、一键重启与在线/离线安装 |
 | `ecs.sh` | ECS/云服务器专项运维工具集（性能监控大屏、IO 分析等） |
 | `sing-box-plus.sh` | Sing-Box 代理管理集成模块（安装/配置/订阅管理） |
 | `db_mgmt_loader.sh` | 数据库模块适配加载器，将 `db_manager/db_mgmt.sh` 接入 TUI 菜单 |
@@ -105,7 +108,7 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 ### 快捷安装 (大陆加速版):
 
 ```bash
-curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/scripts/naive_install.sh | sudo bash
+curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-box/main/naive_install.sh | sudo bash
 ```
 
 ### 核心功能:
@@ -198,46 +201,71 @@ system/db_manager/
   容器名: mysql-prod                            → [DOCKER]
 ```
 
-## 📦 7. 离线安装方案 (无网络环境)
+## ⏰ 7. 系统时间管理中心 (time_mgmt.sh)
 
-针对物理隔离、内网环境或 Github 连接极其不稳定的场景，本工具箱支持 **“有网下载、离线部署”** 的自适应本地安装逻辑。
+已内置于 `ck_sysinit` 主菜单 **「14. 系统时间管理中心」**。深度适配全系列主流与信创 Linux 发行版（Ubuntu/Debian/CentOS/RHEL/Rocky/Alma/银河麒麟/统信UOS/openEuler 等），提供一站式时间基准同步、NTP 局域网/公网服务端搭建及硬件时钟精准管理。
 
-### Step 1: 准备安装包 (有网机器)
+### 核心特性:
 
-在一台可以访问外网的机器上下载完整源码包，并传输至目标服务器：
+1. **Docker NTP 服务器一键部署 (A端/服务端)**:
+   - 基于轻量稳定的 `cturra/ntp` 容器镜像，支持自定义 UDP 映射端口（默认 123）。
+   - 内置国内优质时钟源矩阵（阿里云、腾讯云、国家授时中心、pool.ntp.org）。
+   - 支持**离线孤岛模式**（自动将本机系统时钟伪装为 Stratum 10 本地参考时钟源，供完全物理隔离的机房局域网设备同步）。
+2. **客户端同步与开机自启 (B端/客户端)**:
+   - **双模自动探测**: 优先推荐并配置高精度 `Chrony` 守护进程，在缺失环境自动降级生成稳健的 `ntpdate` 定时同步脚本与 `systemd` 服务。
+   - **环境自愈与冲突清理**: 自动识别并处理 `systemd-timesyncd` 与 `chrony` 冲突，解决信创/旧系统下的 service mask 状态，确保持久化自启生效。
+3. **零依赖健康诊断 (纯 Bash UDP 123 探测)**:
+   - 独创利用 Bash 内置虚拟流 `/dev/udp/` 构造 48 字节标准 NTP v3 报文，无需系统预装任何 `ntpq` 或 `ntpdate` 即可毫秒级探测目标 NTP 服务器的存活性与延迟。
+4. **硬件时钟与漂移全面诊断**:
+   - RTC / hwclock 硬件时钟状态读取、系统时间对齐写入硬件时钟 (`hwclock -w`)，彻底消除多系统切换或离线断电导致的时钟漂移。
+5. **客户端在线/离线一键安装**:
+   - 联动 `system/packages` 本地离线包库与在线官方源，一键安装 `chrony`、`ntpdate` 等运维必备工具。
 
+---
+
+## 📦 8. 离线安装与内置工具包体系 (system/packages)
+
+针对物理隔离、内网断网环境或海外源受限场景，本工具箱提供 **代码免网部署** 与 **底层工具离线 deb/rpm 包预置** 的双重保障。
+
+### 1. 内置双架构基础工具离线包库 (`system/packages/`)
+
+- **DEB 体系 (Debian / Ubuntu / 统信UOS / 银河麒麟桌面版)**: 预置 `curl`, `wget`, `nano`, `vim`, `tar`, `net-tools`, `htop`, `unzip`, `zip`, `cron`, `openssl`, `lsof`, `socat`, `openssh-server`, `chrony`, `ntpdate`, `dnsutils` 等 17 个关键基础工具官方主包。
+- **RPM 体系 (CentOS 7/8 / RHEL / Rocky / AlmaLinux / openEuler)**: 预置 `bind-utils`, `chrony`, `cronie`, `curl`, `htop`, `lsof`, `nano`, `net-tools`, `ntpdate`, `openssl`, `tar`, `unzip`, `wget`, `zip` 等 14 个基础核心 rpm 工具包。
+- **离线包同步脚本 (`system/download_offline_packages.sh`)**: 在一台有外网的机器上运行该脚本，即可一键自动检测并拉取/补齐最新版本的双架构离线工具包。
+
+### 2. 离线服务器部署步骤
+
+#### Step 1: 准备安装包 (有网机器)
+在一台可以访问外网的机器上下载完整源码包（含 `system/packages/`）：
 - **方案 A (Git)**: `git clone https://github.com/kikock/Linux-ops-box.git`
-- **方案 B (ZIP)**: 通过浏览器访问 [Github 仓库](https://github.com/kikock/Linux-ops-box) 下载 `Source Code (zip)`。
+- **方案 B (ZIP)**: 通过浏览器访问 [GitHub 仓库](https://github.com/kikock/Linux-ops-box) 下载并解压 `Source Code (zip)`。
 
-### Step 2: 文件夹传输 (离线服务器)
-
+#### Step 2: 文件夹传输 (离线服务器)
 使用 `scp`、`sftp` 或 U 盘等手段，将解压后的 `Linux-ops-box` 文件夹整体上传到服务器某目录下。
 
-### Step 3: 执行本地部署
-
+#### Step 3: 执行本地部署
 进入该文件夹，直接以 `root` 权限运行安装脚本：
-
 ```bash
 cd Linux-ops-box
 sudo bash install_system.sh
 ```
 
-> **逻辑说明**: 安装程序检测到当前目录存在 `system/` 子目录后，会自动跳过 Github 云端检索，实现秒级的本地软链接及守护库构建工作。
+> **逻辑说明**: 安装程序检测到当前目录存在 `system/` 子目录后，会自动跳过 Github 云端检索，实现秒级的本地软链接及守护库构建。同时内置的离线包库可在完全断网环境下为各模块提供基础工具支撑。
 
 ---
 
-## ⌨️ 8. 命令行参数 (CLI)
+## ⌨️ 9. 命令行参数 (CLI)
 
 `ck_sysinit` 支持以下命令行参数，可在任意目录直接执行：
 
 | 参数 | 别名 | 功能 |
 |:---|:---|:---|
-| *(无参数)* | — | 直接进入 TUI 交互菜单 |
-| `--update` | `-up` | **在线更新**：自动探测 GitHub 直连/镜像，下载最新版并覆盖安装 |
+| *(无参数)* | — | 直接进入 TUI 交互主菜单 |
+| `--update` | `-up` | **在线更新**：智能测速并探测最佳下载通道，下载最新版并覆盖安装 |
 | `--uninstall` | `-u` | **彻底卸载**：删除 `/usr/local/bin/ck_sysinit` 软链接及 `/opt/ck_sysinit` 守护目录 |
 
 ```bash
-# 在线更新到最新版
+# 在线更新到最新版 (支持智能延迟探测)
 ck_sysinit --update
 
 # 彻底卸载
@@ -248,7 +276,7 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 
 ---
 
-## 🛠 开发扩展说明 (Developer Guide)
+## 🛠 10. 开发扩展说明 (Developer Guide)
 
 本工具箱采用高度模块化的 Shell 函数架构，极易进行二次开发。
 
@@ -270,7 +298,7 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 
 ---
 
-## 🚀 后续更新计划 (Roadmap)
+## 🚀 11. 后续更新计划 (Roadmap)
 
 我们致力于将 `Linux-ops-box` 打造为最懂运维、最轻量的 TUI 工具箱。
 
@@ -278,7 +306,8 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 
 - [ ] **运维告警集成**: 支持 Telegram / 钉钉 / 飞书 机器人推送系统关键指标异常告警。
 - [x] **数据库管理中心**: ✅ MySQL / PostgreSQL TUI 管理（v2.1 已落地，含 Docker 容器模式、定时备份、多连接管理、数据表自动化归档）。
-- [ ] **SSL 证书管家**: 集成 `acme.sh` 的全量生命周期管理，支持自动化 DNS-01 验证。
+- [x] **SSL 证书管家**: ✅ 已落地（融合 `acme.sh` 商业证书与 `openssl` 离线自签、IP 证书、DNS API 泛域名申请、私有根 CA 签发）。
+- [x] **系统时间管理中心**: ✅ 已落地（支持 RTC 硬件时钟读写、Docker NTP 服务端搭建、Chrony/ntpdate 客户端自启与纯 Bash UDP 123 零依赖健康探测）。
 - [ ] **Redis 管理扩展**: 基于数据库管理中心框架，扩展 Redis 键值浏览与 RDB/AOF 备份支持。
 
 ### 🌠 长期规划 (v3.0+)
@@ -292,3 +321,4 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 ## 📄 LICENSE
 
 MIT License.
+
