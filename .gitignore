@@ -2,6 +2,8 @@
 *.tar
 *.tar.gz
 *.zip
+!PlatformLoader_Offline_Toolkit_Backup.zip
+
 *.iso
 
 # OS / Editor files
