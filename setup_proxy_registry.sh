@@ -84,18 +84,21 @@ check_statuses() {
         fi
     fi
 
-    # 5. 公共 DNS 配置检测
-    local dns_missing="false"
+    # 5. 公共 DNS 配置检测（同时兼容 IPv4 DNS 和 IPv6 DNS64）
+    local dns_found="false"
+    # 检测常规 IPv4 DNS
+    local all_ipv4_present="true"
     for dns in ${DNS_LIST}; do
         if ! grep -q "^nameserver[[:space:]]\+${dns}" /etc/resolv.conf 2>/dev/null; then
-            dns_missing="true"
+            all_ipv4_present="false"
         fi
     done
-    if [ "${dns_missing}" = "false" ]; then
-        DNS_OK="true"
-    else
-        DNS_OK="false"
+    [ "${all_ipv4_present}" = "true" ] && dns_found="true"
+    # 检测 DNS64（纯 IPv6 环境写入的地址）
+    if grep -q "2a00:1098:2b::1" /etc/resolv.conf 2>/dev/null; then
+        dns_found="true"
     fi
+    DNS_OK="${dns_found}"
 }
 
 get_status_label() {
@@ -281,15 +284,50 @@ EOF
 
     # 6. 配置公共 DNS (追加到 resolv.conf)
     echo -e "\n${BLUE}[ 配置公共 DNS ]${NC}"
+
+    # 三态网络探测（2s 超时，避免卡顿）
+    # ┌─ IPv4 公网可达  → 用常规 IPv4 DNS (223.5.5.5 等)
+    # ├─ IPv6 公网可达  → 用 DNS64   (2a00:1098:2b::1 等)
+    # └─ 均不可达       → 局域网+代理模式，DHCP 已分配 DNS，跳过写入
+    local net_mode="lan_proxy"  # 默认：局域网代理，不动 DNS
+    if curl -s4 -m 2 icanhazip.com -k >/dev/null 2>&1; then
+        net_mode="ipv4"         # IPv4 公网可达
+    elif curl -s6 -m 2 icanhazip.com -k >/dev/null 2>&1; then
+        net_mode="ipv6_only"    # 纯 IPv6 公网（IPv4 完全不通）
+    fi
+
     local dns_added="false"
-    for dns in ${DNS_LIST}; do
-        if ! grep -q "^nameserver[[:space:]]\+${dns}" /etc/resolv.conf 2>/dev/null; then
-            echo "nameserver ${dns}" >> /etc/resolv.conf
-            echo -e " ${GREEN}✔${NC} 已将 DNS ${dns} 追加至 /etc/resolv.conf"
-            dns_added="true"
-        fi
-    done
-    if [ "${dns_added}" = "false" ]; then
+    case "${net_mode}" in
+        ipv4)
+            # 正常双栈 / 纯 IPv4 环境：使用常规公共 DNS
+            for dns in ${DNS_LIST}; do
+                if ! grep -q "^nameserver[[:space:]]\+${dns}" /etc/resolv.conf 2>/dev/null; then
+                    echo "nameserver ${dns}" >> /etc/resolv.conf
+                    echo -e " ${GREEN}✔${NC} 已将 DNS ${dns} 追加至 /etc/resolv.conf"
+                    dns_added="true"
+                fi
+            done
+            ;;
+        ipv6_only)
+            # 纯 IPv6 公网：IPv4 DNS 地址无路由，改用 DNS64（IPv6 可达，支持 NAT64 合成）
+            echo -e " ${YELLOW}⚠ 检测到纯 IPv6 环境，IPv4 DNS 不可达，将使用 DNS64 服务器${NC}"
+            local dns64_list="2a00:1098:2b::1 2a00:1098:2c::1 2a01:4f8:c2c:123f::1"
+            for dns in ${dns64_list}; do
+                if ! grep -q "^nameserver[[:space:]]\+${dns}" /etc/resolv.conf 2>/dev/null; then
+                    echo "nameserver ${dns}" >> /etc/resolv.conf
+                    echo -e " ${GREEN}✔${NC} 已将 DNS64 ${dns} 追加至 /etc/resolv.conf"
+                    dns_added="true"
+                fi
+            done
+            ;;
+        lan_proxy)
+            # 局域网+代理模式：IPv4/IPv6 公网均不可直连，机器通过局域网代理上网
+            # DHCP 已分配可用的局域网 DNS，强行写入公共 DNS 反而会超时失败，跳过
+            echo -e " ${YELLOW}ℹ 检测到局域网代理模式（无公网直连），保留 DHCP 分配的 DNS，跳过写入${NC}"
+            ;;
+    esac
+
+    if [ "${dns_added}" = "false" ] && [ "${net_mode}" != "lan_proxy" ]; then
         echo -e " ${YELLOW}ℹ${NC} 公共 DNS 已存在于 /etc/resolv.conf，无需重复添加"
     fi
 
@@ -385,12 +423,21 @@ with open(daemon_file, "w") as f:
         echo -e " ${GRAY}○ Docker 仓库配置不存在，无需清理${NC}"
     fi
 
-    # 5. 清理 DNS 配置
+    # 5. 清理 DNS 配置（同时清理常规 IPv4 DNS 和 DNS64 条目）
     local dns_removed="false"
     for dns in ${DNS_LIST}; do
         if grep -q "^nameserver[[:space:]]\+${dns}" /etc/resolv.conf 2>/dev/null; then
             sed -i "/^nameserver[[:space:]]\+${dns}/d" /etc/resolv.conf
             echo -e " ${GREEN}✔${NC} 已从 /etc/resolv.conf 中清理 DNS ${dns}"
+            dns_removed="true"
+        fi
+    done
+    # 清理 DNS64 条目（纯 IPv6 环境下可能写入）
+    local dns64_list="2a00:1098:2b::1 2a00:1098:2c::1 2a01:4f8:c2c:123f::1"
+    for dns in ${dns64_list}; do
+        if grep -q "^nameserver[[:space:]]\+${dns}" /etc/resolv.conf 2>/dev/null; then
+            sed -i "/^nameserver[[:space:]]\+${dns}/d" /etc/resolv.conf
+            echo -e " ${GREEN}✔${NC} 已从 /etc/resolv.conf 中清理 DNS64 ${dns}"
             dns_removed="true"
         fi
     done
