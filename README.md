@@ -29,8 +29,8 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 | 序号 | 功能模块 | 核心子功能 | 对应模块文件 |
 |:---:|:---|:---|:---|
 | 1 | **系统软件包更新** | 依赖清理 / 内核升级 | `system_opt.sh` |
-| 2 | **系统环境深度优化** | 换源 / BBR / Swap / 时区 | `system_opt.sh` |
-| 3 | **常用专家工具集** | 最小化系统必备工具安装 | `system_opt.sh` |
+| 2 | **系统环境深度优化** | 换源 / BBR / Swap / 挂载 / 代理 | `system_opt.sh` |
+| 3 | **常用专家工具集** | 采集离线包 / 在线安装 / 本地离线部署 (最小化系统必备) | `system_opt.sh` |
 | 4 | **SSH 远程安全加固** | 证书登录 / 端口自定义 / 防爆破 / 服务状态监控 / 一键重启与安装 | `ssh_sec.sh` |
 | 5 | **防火墙安全管理** | UFW / FirewallD TUI 管理 | `firewall_mgmt.sh` |
 | 6 | **网络 IP 与网卡诊断** | 静态 IP / 路由 / 网卡信息 | `network.sh` |
@@ -41,7 +41,7 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 | 11 | **服务器代理配置** | Hosts 代理加速 / 环境变量代理 / Docker 镜像与信任 | `setup_proxy_registry.sh` |
 | 12 | **SSL/TLS 证书管理中心** | ACME 联网商业证书申请 / 离线自签证书体系 / 私有根 CA | `ssl_cert.sh` / `acme.sh` |
 | 13 | **硬盘检测与清理中心** | 磁盘使用率 / 大文件 / 大目录 / 智能清理辅助 | `disk_mgmt.sh` |
-| 14 | **系统时间管理中心** | RTC硬件时钟 / NTP服务器搭建 / 多源对齐 / 开机同步 (详见 §7) | `time_mgmt.sh` |
+| 14 | **系统时间管理中心** | 系统时区配置 / RTC硬件时钟 / NTP服务器搭建 / 多源对齐 / 开机同步 (详见 §7) | `time_mgmt.sh` |
 | 88 | **在线更新工具箱** | 智能探测最优加速通道 (支持5大源测速) 并云端热覆写 | 内置 |
 | 99 | **卸载工具箱** | 清理软链接与守护目录 | 内置 |
 | 0 | **退出工具箱** | 退出管理程序 | 内置 |

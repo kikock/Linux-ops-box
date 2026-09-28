@@ -2292,9 +2292,10 @@ _remove_ntp_setup() {
 # 状态栏：在菜单顶部显示实时时间状态摘要
 # ================================================================
 _draw_time_status_bar() {
-    local sys_time ntp_container_status rtc_status sync_status
+    local sys_time ntp_container_status rtc_status sync_status tz_info
 
-    sys_time=$(date '+%Y-%m-%d %H:%M:%S %Z')
+    sys_time=$(date '+%Y-%m-%d %H:%M:%S')
+    tz_info=$(date '+%Z %z')
 
     # RTC 状态简检
     if hwclock --show &>/dev/null 2>&1; then
@@ -2330,7 +2331,7 @@ _draw_time_status_bar() {
     fi
 
     echo -e "${CYAN}┌──────────────────────────────────────────────────┐${NC}"
-    echo -e "${CYAN}│${NC}  系统时间  : ${CYAN}${sys_time}${NC}"
+    echo -e "${CYAN}│${NC}  系统时间  : ${CYAN}${sys_time}${NC} ${YELLOW}[${tz_info}]${NC}"
     echo -e "${CYAN}│${NC}  硬件时钟  : ${rtc_status}"
     echo -e "${CYAN}│${NC}  NTP 容器  : ${ntp_container_status}"
     echo -e "${CYAN}│${NC}  时间同步  : ${sync_status}"
@@ -2549,6 +2550,116 @@ AUTO_UNIT_EOF
 }
 
 # ================================================================
+# 功能 9：系统时区管理与配置
+# ================================================================
+_manage_system_timezone() {
+    clear
+    _time_header "系统时区管理与配置"
+    echo ""
+
+    # 获取当前时区信息
+    local current_tz="未知"
+    if command -v timedatectl &>/dev/null; then
+        current_tz=$(timedatectl show --property=Timezone --value 2>/dev/null)
+    fi
+    if [ -z "$current_tz" ] || [ "$current_tz" = "未知" ]; then
+        if [ -f /etc/timezone ]; then
+            current_tz=$(cat /etc/timezone 2>/dev/null | tr -d '\r\n')
+        elif [ -L /etc/localtime ]; then
+            current_tz=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
+        fi
+    fi
+    [ -z "$current_tz" ] && current_tz="未知"
+
+    local current_time
+    current_time=$(date '+%Y-%m-%d %H:%M:%S %Z (%z)')
+
+    echo -e "  当前系统时区 : ${GREEN}${current_tz}${NC}"
+    echo -e "  当前系统时间 : ${CYAN}${current_time}${NC}"
+    echo ""
+    echo -e "${YELLOW}请选择目标时区:${NC}"
+    echo -e "  1. 中国标准时间  (Asia/Shanghai - CST+8) [推荐]"
+    echo -e "  2. 协调世界时    (UTC)"
+    echo -e "  3. 中国香港时间  (Asia/Hong_Kong - HKT+8)"
+    echo -e "  4. 自定义时区    (手动输入时区标识，如 America/New_York)"
+    echo -e "  0. 返回上级"
+    echo ""
+    read -p "  请输入选项 [0-4]: " tz_choice < /dev/tty
+
+    local target_tz=""
+    case "$tz_choice" in
+        1)
+            target_tz="Asia/Shanghai"
+            ;;
+        2)
+            target_tz="UTC"
+            ;;
+        3)
+            target_tz="Asia/Hong_Kong"
+            ;;
+        4)
+            echo ""
+            read -p "  请输入时区标识 (例如 Asia/Tokyo 或 Europe/London): " custom_tz < /dev/tty
+            custom_tz=$(echo "$custom_tz" | xargs)
+            if [ -z "$custom_tz" ]; then
+                echo -e "  ${RED}时区标识不能为空！${NC}"
+                sleep 1
+                return 1
+            fi
+            # 校验时区有效性
+            if [ -d /usr/share/zoneinfo ] && [ ! -f "/usr/share/zoneinfo/${custom_tz}" ]; then
+                echo -e "  ${YELLOW}警告: /usr/share/zoneinfo/${custom_tz} 文件不存在，可能为无效时区。${NC}"
+                read -p "  是否依然尝试设置? [y/N]: " confirm_tz < /dev/tty
+                if [[ ! "$confirm_tz" =~ ^[Yy]$ ]]; then
+                    echo -e "  ${BLUE}操作已取消。${NC}"
+                    sleep 1
+                    return 0
+                fi
+            fi
+            target_tz="$custom_tz"
+            ;;
+        0)
+            return 0
+            ;;
+        *)
+            echo -e "  ${RED}输入无效。${NC}"
+            sleep 1
+            return 1
+            ;;
+    esac
+
+    echo ""
+    echo -e "  ${YELLOW}⏳ 正在设置时区为: ${CYAN}${target_tz}${YELLOW}...${NC}"
+
+    local set_success=false
+    if command -v timedatectl &>/dev/null; then
+        if timedatectl set-timezone "$target_tz" 2>/dev/null; then
+            set_success=true
+        fi
+    fi
+
+    # 软链接与配置文件兜底
+    if [ -f "/usr/share/zoneinfo/${target_tz}" ]; then
+        ln -sf "/usr/share/zoneinfo/${target_tz}" /etc/localtime 2>/dev/null && set_success=true
+        echo "$target_tz" > /etc/timezone 2>/dev/null || true
+    fi
+
+    if [ "$set_success" = true ]; then
+        # 尝试将新时间对齐写入 RTC 硬件时钟
+        if hwclock --systohc 2>/dev/null; then
+            echo -e "  ${GREEN}✓ 硬件时钟 (RTC) 已同步对齐。${NC}"
+        fi
+        echo -e "  ${GREEN}✅ 系统时区已成功设置为: ${CYAN}${target_tz}${NC}"
+        echo -e "  当前最新时间 : ${CYAN}$(date '+%Y-%m-%d %H:%M:%S %Z (%z)')${NC}"
+    else
+        echo -e "  ${RED}✗ 设置时区失败，请检查系统中是否存在对应 zoneinfo 数据包。${NC}"
+    fi
+
+    echo ""
+    read -p "  按回车键返回..." -r < /dev/tty
+}
+
+# ================================================================
 # 主入口：时间管理中心 TUI 菜单
 # ================================================================
 time_management_menu() {
@@ -2567,13 +2678,14 @@ time_management_menu() {
         echo -e " 5. 查看硬件时钟 (RTC/hwclock) 状态与对齐"
         echo -e "${GREEN}══════════════ ⚡ 运维与操作 ══════════════${NC}"
         echo -e " 6. 立即手动同步系统时间"
-        echo -e " 7. 停止并清理 NTP 服务 (可选: Docker服务器 / Chrony客户端 / 全部)"
+        echo -e " 7. 系统时区管理与配置       (上海 Asia/Shanghai / UTC / 自定义)"
+        echo -e " 8. 停止并清理 NTP 服务     (可选: Docker服务器 / Chrony客户端 / 全部)"
         echo -e "${GREEN}══════════════ 🔧 工具管理 ════════════════${NC}"
-        echo -e " 8. 安装 NTP 客户端工具 (离线/在线一键安装 chrony / ntpdate)"
+        echo -e " 9. 安装 NTP 客户端工具     (离线/在线一键安装 chrony / ntpdate)"
         echo -e "${GREEN}==============================================${NC}"
         echo -e " 0. 返回主菜单"
         echo -e "${GREEN}==============================================${NC}"
-        read -p "请输入选项 [0-8]: " time_choice < /dev/tty
+        read -p "请输入选项 [0-9]: " time_choice < /dev/tty
 
         case "$time_choice" in
             1) _setup_ntp_docker ;;
@@ -2582,8 +2694,9 @@ time_management_menu() {
             4) _check_ntp_health ;;
             5) _check_hwclock ;;
             6) _manual_sync_time ;;
-            7) _remove_ntp_setup ;;
-            8) _install_ntp_tools ;;
+            7) _manage_system_timezone ;;
+            8) _remove_ntp_setup ;;
+            9) _install_ntp_tools ;;
             0)
                 echo -e "${BLUE}返回中...${NC}"
                 break
