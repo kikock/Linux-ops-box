@@ -352,12 +352,17 @@ install_via_binary() {
         echo -e "  ${YELLOW}>> 使用内置推荐版本${NC}"
 
     echo -e "  >> 采集 Docker Compose 版本列表..."
+    # 精准提取 releases/tag/vX.Y.Z 真实 Release 标签，杜绝误抓正文内第三方依赖版本（如 containerd v2.3.5）
     local RAW_C=$(curl -sL --connect-timeout 8 "${MIRROR}/docker/compose/releases" | \
-        grep -oE 'v2\.[0-9]+\.[0-9]+' | sort -ur | head -n 6)
+        grep -oE 'releases/tag/v[0-9]+\.[0-9]+\.[0-9]+' | \
+        sed 's|releases/tag/||' | sort -uV | tail -n 8)
     IFS=$'\n' read -rd '' -a C_VERS <<< "$RAW_C"
-    [ ${#C_VERS[@]} -eq 0 ] && C_VERS=("v2.26.1" "v2.27.0" "v2.28.1")
+    if [ ${#C_VERS[@]} -eq 0 ]; then
+        C_VERS=("v2.35.0" "v2.39.4" "v2.40.3")
+        echo -e "  ${YELLOW}>> 使用内置推荐版本${NC}"
+    fi
 
-    local DEF_D="${D_VERS[-1]}" DEF_C="${C_VERS[0]}"
+    local DEF_D="${D_VERS[-1]}" DEF_C="${C_VERS[-1]}"
     echo ""
     echo -e "  可用 Engine 版本:  ${YELLOW}${D_VERS[*]}${NC}"
     read -p "  Docker Engine 版本 [默认 $DEF_D]: " CHOSEN_D < /dev/tty
@@ -367,6 +372,7 @@ install_via_binary() {
     echo -e "  可用 Compose 版本: ${YELLOW}${C_VERS[*]}${NC}"
     read -p "  Docker Compose 版本 [默认 $DEF_C]: " CHOSEN_C < /dev/tty
     CHOSEN_C=${CHOSEN_C:-$DEF_C}
+    [[ ! "$CHOSEN_C" =~ ^v ]] && CHOSEN_C="v${CHOSEN_C}"
 
     echo ""
     echo -e "${CYAN}+======================================================+${NC}"
