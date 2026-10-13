@@ -1104,10 +1104,595 @@ _install_offline_packages_local() {
 }
 
 # ================================================================
+# 子功能 4: Mise 多运行时环境管理
+# (Mise 安装/配置/版本查看/管理 Java, Node.js, Go, Python)
+# ================================================================
+
+# 确保 mise 命令在当前环境中可用
+_ensure_mise_env() {
+    if ! command -v mise &>/dev/null; then
+        if [ -x "/usr/local/bin/mise" ]; then
+            export PATH="/usr/local/bin:$PATH"
+        elif [ -x "$HOME/.local/bin/mise" ]; then
+            export PATH="$HOME/.local/bin:$PATH"
+        fi
+    fi
+    if [ -d "$HOME/.local/share/mise/shims" ]; then
+        case ":$PATH:" in
+            *":$HOME/.local/share/mise/shims:"*) ;;
+            *) export PATH="$HOME/.local/share/mise/shims:$PATH" ;;
+        esac
+    fi
+    if command -v mise &>/dev/null; then
+        eval "$(mise activate bash 2>/dev/null)" || true
+    fi
+}
+
+# 1. 安装或更新 Mise
+_mise_install_core() {
+    clear
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "${CYAN}         🚀 安装 / 更新 Mise 多运行时管理器           ${NC}"
+    echo -e "${CYAN}======================================================${NC}"
+    _ensure_mise_env
+
+    if command -v mise &>/dev/null; then
+        local cur_ver
+        cur_ver=$(mise --version 2>/dev/null || echo "未知")
+        echo -e "${GREEN}检测到 Mise 已安装: ${CYAN}${cur_ver}${NC}"
+        echo ""
+        read -p "是否尝试在线更新 Mise 至最新版? [y/N]: " update_choice < /dev/tty
+        if [[ "$update_choice" =~ ^[Yy]$ ]]; then
+            echo -e "⏳ 正在执行 mise self-update..."
+            if mise self-update -y 2>/dev/null || mise self-update 2>/dev/null; then
+                echo -e "${GREEN}✅ Mise 自更新成功！${NC}"
+            else
+                echo -e "${YELLOW}自更新返回异常，尝试使用官方安装脚本覆写更新...${NC}"
+                curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
+            fi
+        else
+            echo -e "${BLUE}已取消更新。${NC}"
+            read -p "按回车键继续..." -r < /dev/tty
+            return 0
+        fi
+    else
+        echo -e "${BLUE}[1/3] 正在检测网络与基础依赖...${NC}"
+        if ! _check_net_available; then
+            echo -e "${RED}✗ 网络不可达，Mise 需要网络连接下载二进制文件！${NC}"
+            read -p "按回车键返回..." -r < /dev/tty
+            return 1
+        fi
+
+        # 补齐必备基础依赖 curl / tar / git / sudo
+        if ! command -v curl &>/dev/null || ! command -v tar &>/dev/null || ! command -v git &>/dev/null; then
+            echo -e "${YELLOW}⏳ 正在安装必备依赖 (curl, tar, git)...${NC}"
+            case "$PKG_MGR" in
+                apt)     apt-get update -y 2>/dev/null; apt-get install -y curl tar git sudo ;;
+                dnf|yum) $PKG_INSTALL curl tar git sudo ;;
+                apk)     apk add curl tar git sudo ;;
+            esac
+        fi
+
+        echo -e "${BLUE}[2/3] 正在下载并安装 Mise 核心程序到 /usr/local/bin/mise...${NC}"
+        local install_success=false
+
+        # 尝试标准官方渠道
+        if curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh; then
+            install_success=true
+        else
+            echo -e "${YELLOW}官方直接通道拉取失败，尝试使用 GitHub 加速镜像拉取...${NC}"
+            if curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/jdx/mise/main/packaging/standalone/install.sh | MISE_INSTALL_PATH=/usr/local/bin/mise sh; then
+                install_success=true
+            fi
+        fi
+
+        if [ "$install_success" = false ] && [ ! -x "/usr/local/bin/mise" ] && [ ! -x "$HOME/.local/bin/mise" ]; then
+            echo -e "${RED}❌ Mise 安装失败，请检查服务器对 GitHub / mise.jdx.dev 的网络连通性。${NC}"
+            read -p "按回车键返回..." -r < /dev/tty
+            return 1
+        fi
+
+        if [ -x "/usr/local/bin/mise" ]; then
+            chmod +x /usr/local/bin/mise
+        fi
+        echo -e "${GREEN}✓ Mise 核心程序下载并部署成功！${NC}"
+    fi
+
+    # 自动配置全局 Profile 与 Shell 激活
+    echo -e "${BLUE}[3/3] 正在配置系统级 Shell 激活与环境变量...${NC}"
+    cat > /etc/profile.d/mise.sh << 'EOF'
+# Mise Environment Loader
+export PATH="/usr/local/bin:$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
+if command -v mise &>/dev/null; then
+    eval "$(mise activate bash 2>/dev/null)"
+fi
+EOF
+    chmod 644 /etc/profile.d/mise.sh
+
+    # 用户级 ~/.bashrc 兜底保证
+    if ! grep -q "mise activate bash" "$HOME/.bashrc" 2>/dev/null; then
+        echo -e '\n# Mise activation\nexport PATH="/usr/local/bin:$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"' >> "$HOME/.bashrc"
+        echo 'if command -v mise &>/dev/null; then eval "$(mise activate bash 2>/dev/null)"; fi' >> "$HOME/.bashrc"
+    fi
+
+    _ensure_mise_env
+    echo ""
+    local final_ver
+    final_ver=$(mise --version 2>/dev/null || echo "已就绪")
+    echo -e "${GREEN}✅ Mise 安装与初始化完成！当前版本: ${CYAN}${final_ver}${NC}"
+    echo -e "${YELLOW}提示: 环境变量已写入 /etc/profile.d/mise.sh 及 ~/.bashrc，全局会话自动激活。${NC}"
+    echo ""
+    read -p "按回车键继续..." -r < /dev/tty
+}
+
+# 2. 配置 Mise 与国内镜像加速
+_mise_config_env() {
+    clear
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "${CYAN}         ⚙️  配置 Mise 环境与语言镜像加速源           ${NC}"
+    echo -e "${CYAN}======================================================${NC}"
+    _ensure_mise_env
+
+    if ! command -v mise &>/dev/null; then
+        echo -e "${RED}错误: 未检测到 Mise，请先执行选项 1 安装 Mise。${NC}"
+        read -p "按回车键返回..." -r < /dev/tty
+        return 1
+    fi
+
+    echo -e "请选择需要配置的加速与环境选项:"
+    echo -e " 1. 🚀 配置国内常用开发镜像加速 (Go代理 + NPM镜像 + Python PyPI源)"
+    echo -e " 2. 🔄 重建并刷新系统级 Shell 钩子 (/etc/profile.d/mise.sh 与 ~/.bashrc)"
+    echo -e " 3. 🛠  开启 Mise Shims 模式并重新生成 shims (mise reshim)"
+    echo -e " 0. 返回"
+    echo -e "${CYAN}======================================================${NC}"
+    read -p "请选择操作 [0-3]: " cfg_choice < /dev/tty
+
+    case $cfg_choice in
+        1)
+            echo -e "${BLUE}正在写入开发语言国内加速源配置...${NC}"
+            # 1. Go Proxy 加速
+            if ! grep -q "GOPROXY=" /etc/profile.d/mise.sh 2>/dev/null; then
+                echo 'export GOPROXY="https://goproxy.cn,direct"' >> /etc/profile.d/mise.sh
+            fi
+            export GOPROXY="https://goproxy.cn,direct"
+            echo -e "  ✓ Go 代理已设置为: ${GREEN}https://goproxy.cn,direct${NC}"
+
+            # 2. NPM 镜像加速
+            if command -v npm &>/dev/null; then
+                npm config set registry https://registry.npmmirror.com 2>/dev/null || true
+                echo -e "  ✓ NPM 镜像已设置为: ${GREEN}https://registry.npmmirror.com${NC}"
+            fi
+
+            # 3. Pip 镜像加速
+            mkdir -p "$HOME/.pip"
+            cat > "$HOME/.pip/pip.conf" << 'EOF'
+[global]
+index-url = https://pypi.tuna.tsinghua.edu.cn/simple
+trusted-host = pypi.tuna.tsinghua.edu.cn
+EOF
+            echo -e "  ✓ Pip 镜像已设置为: ${GREEN}清华大学开源镜像源 (pypi.tuna.tsinghua.edu.cn)${NC}"
+            echo -e "${GREEN}✅ 国内开发镜像加速源配置完成！${NC}"
+            ;;
+        2)
+            echo -e "${BLUE}正在重建系统级环境变量与 Shell 钩子...${NC}"
+            cat > /etc/profile.d/mise.sh << 'EOF'
+# Mise Environment Loader
+export PATH="/usr/local/bin:$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
+export GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
+if command -v mise &>/dev/null; then
+    eval "$(mise activate bash 2>/dev/null)"
+fi
+EOF
+            chmod 644 /etc/profile.d/mise.sh
+            _ensure_mise_env
+            echo -e "${GREEN}✅ Shell 激活与全局配置文件已刷新。${NC}"
+            ;;
+        3)
+            echo -e "${BLUE}正在执行 mise reshim 刷新二进制软链接...${NC}"
+            mise reshim 2>/dev/null || true
+            echo -e "${GREEN}✅ Shims 已重新生成！${NC}"
+            ;;
+        0)
+            return 0
+            ;;
+        *)
+            echo -e "${RED}无效选项${NC}"
+            ;;
+    esac
+    echo ""
+    read -p "按回车键继续..." -r < /dev/tty
+}
+
+# 3. 查看 Mise 版本与多语言环境状态
+_mise_view_status() {
+    clear
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "${CYAN}         🔍 Mise 版本与多语言运行环境状态自检         ${NC}"
+    echo -e "${CYAN}======================================================${NC}"
+    _ensure_mise_env
+
+    if ! command -v mise &>/dev/null; then
+        echo -e "${RED}状态: 未检测到 Mise 安装。${NC}"
+        echo -e "${YELLOW}提示: 请在二级菜单选择「1. 安装 / 更新 Mise」进行一键安装。${NC}"
+        echo ""
+        read -p "按回车键继续..." -r < /dev/tty
+        return 1
+    fi
+
+    echo -e "${GREEN}【Mise 核心信息】${NC}"
+    echo -ne "  程序路径: "
+    which mise 2>/dev/null || echo "/usr/local/bin/mise"
+    echo -ne "  核心版本: ${CYAN}"
+    mise --version 2>/dev/null || echo "未知"
+    echo -e "${NC}"
+
+    echo -e "${GREEN}【Mise 已安装运行时清单 (mise ls)】${NC}"
+    local ls_output
+    ls_output=$(mise ls 2>/dev/null || true)
+    if [ -z "$ls_output" ]; then
+        echo -e "  ${YELLOW}(暂无通过 Mise 安装的运行时组件)${NC}"
+    else
+        echo "$ls_output" | sed 's/^/  /'
+    fi
+    echo ""
+
+    echo -e "${GREEN}【当前全局激活版本 (mise current)】${NC}"
+    local cur_output
+    cur_output=$(mise current 2>/dev/null || true)
+    if [ -z "$cur_output" ]; then
+        echo -e "  ${YELLOW}(暂未设置全局激活运行时)${NC}"
+    else
+        echo "$cur_output" | sed 's/^/  /'
+    fi
+    echo ""
+
+    echo -e "${GREEN}【终端当前实际解析命令状态】${NC}"
+    # Java
+    if command -v java &>/dev/null; then
+        local j_ver
+        j_ver=$(java -version 2>&1 | head -n 1)
+        printf "  %-10s: ${GREEN}[已就绪]${NC} %s\n" "Java" "$j_ver"
+    else
+        printf "  %-10s: ${RED}[未就绪]${NC}\n" "Java"
+    fi
+
+    # Node.js
+    if command -v node &>/dev/null; then
+        local n_ver
+        n_ver=$(node -v 2>/dev/null)
+        printf "  %-10s: ${GREEN}[已就绪]${NC} %s\n" "Node.js" "$n_ver"
+    else
+        printf "  %-10s: ${RED}[未就绪]${NC}\n" "Node.js"
+    fi
+
+    # Go
+    if command -v go &>/dev/null; then
+        local g_ver
+        g_ver=$(go version 2>/dev/null)
+        printf "  %-10s: ${GREEN}[已就绪]${NC} %s\n" "Go" "$g_ver"
+    else
+        printf "  %-10s: ${RED}[未就绪]${NC}\n" "Go"
+    fi
+
+    # Python
+    if command -v python3 &>/dev/null; then
+        local py_ver
+        py_ver=$(python3 --version 2>/dev/null)
+        printf "  %-10s: ${GREEN}[已就绪]${NC} %s\n" "Python3" "$py_ver"
+    else
+        printf "  %-10s: ${RED}[未就绪]${NC}\n" "Python3"
+    fi
+
+    echo -e "${CYAN}======================================================${NC}"
+    read -p "按回车键继续..." -r < /dev/tty
+}
+
+# 辅助: 检查并安装编译依赖 (针对 Python 等可能需要编译或特定底层库的运行时)
+_ensure_runtime_build_deps() {
+    local tool="$1"
+    if [ "$tool" = "python" ]; then
+        echo -e "${YELLOW}⏳ 检测到正在安装 Python，正在补充必要底层系统库 (ssl/ffi/zlib)...${NC}"
+        case "$PKG_MGR" in
+            apt)
+                apt-get update -y 2>/dev/null || true
+                apt-get install -y build-essential libssl-dev zlib1g-dev libbz2-dev \
+                    libreadline-dev libsqlite3-dev libffi-dev liblzma-dev 2>/dev/null || true
+                ;;
+            dnf|yum)
+                $PKG_INSTALL gcc make openssl-devel zlib-devel bzip2-devel \
+                    readline-devel sqlite-devel libffi-devel xz-devel 2>/dev/null || true
+                ;;
+            apk)
+                apk add build-base openssl-dev zlib-dev bzip2-dev readline-dev sqlite-dev libffi-dev xz-dev 2>/dev/null || true
+                ;;
+        esac
+    fi
+}
+
+# 4/5/6/7 通用语言运行时安装与管理
+_manage_mise_tool() {
+    local tool="$1"
+    local tool_label="$2"
+    local rec_versions="$3"
+
+    while true; do
+        clear
+        echo -e "${CYAN}======================================================${NC}"
+        echo -e "${CYAN}      📦 Mise 运行时管理: ${tool_label} (${tool})      ${NC}"
+        echo -e "${CYAN}======================================================${NC}"
+        _ensure_mise_env
+
+        if ! command -v mise &>/dev/null; then
+            echo -e "${RED}错误: 未检测到 Mise，请先在上一级菜单安装 Mise！${NC}"
+            read -p "按回车键返回..." -r < /dev/tty
+            return 1
+        fi
+
+        # 显示当前已安装版本
+        echo -e "${GREEN}当前已安装的 ${tool_label} 版本:${NC}"
+        local installed_list
+        installed_list=$(mise ls "$tool" 2>/dev/null || true)
+        if [ -z "$installed_list" ]; then
+            echo -e "  ${YELLOW}(暂无已安装版本)${NC}"
+        else
+            echo "$installed_list" | sed 's/^/  /'
+        fi
+        echo ""
+
+        echo -e "可选操作:"
+        echo -e " 1. 🚀 安装推荐版本 (${rec_versions})"
+        echo -e " 2. ✍️  手动指定版本号安装"
+        echo -e " 3. 🌐 查询可用的远程版本清单 (最近25个)"
+        echo -e " 4. 🔀 切换全局生效版本 (mise use -g ${tool}@<版本>)"
+        echo -e " 5. 🗑  卸载指定版本 (mise uninstall ${tool}@<版本>)"
+        echo -e " 0. 返回上一级菜单"
+        echo -e "${CYAN}======================================================${NC}"
+        read -p "请选择操作 [0-5]: " act_choice < /dev/tty
+
+        case $act_choice in
+            1)
+                echo ""
+                echo -e "${GREEN}推荐版本清单: ${CYAN}${rec_versions}${NC}"
+                read -p "请输入要安装的推荐版本 (例如 ${rec_versions%%,*}): " ver_input < /dev/tty
+                if [ -z "$ver_input" ]; then
+                    echo -e "${YELLOW}已取消安装。${NC}"
+                    sleep 1
+                    continue
+                fi
+                _ensure_runtime_build_deps "$tool"
+                echo -e "⏳ 正在通过 Mise 安装 ${tool}@${ver_input}，请稍候..."
+                if mise install "${tool}@${ver_input}"; then
+                    mise use -g "${tool}@${ver_input}"
+                    mise reshim 2>/dev/null || true
+                    _ensure_mise_env
+                    echo -e "${GREEN}✅ ${tool_label} (${tool}@${ver_input}) 安装并设置为全局默认成功！${NC}"
+                else
+                    echo -e "${RED}❌ 安装失败，请检查网络或版本号输入是否正确。${NC}"
+                fi
+                read -p "按回车键继续..." -r < /dev/tty
+                ;;
+            2)
+                echo ""
+                read -p "请输入欲安装的具体版本号 (例如 latest 或 具体数字): " custom_ver < /dev/tty
+                if [ -z "$custom_ver" ]; then
+                    echo -e "${YELLOW}输入为空，取消操作。${NC}"
+                    sleep 1
+                    continue
+                fi
+                _ensure_runtime_build_deps "$tool"
+                echo -e "⏳ 正在安装 ${tool}@${custom_ver}..."
+                if mise install "${tool}@${custom_ver}"; then
+                    read -p "是否将其设为系统全局默认版本? [Y/n]: " set_global < /dev/tty
+                    if [[ ! "$set_global" =~ ^[Nn]$ ]]; then
+                        mise use -g "${tool}@${custom_ver}"
+                    fi
+                    mise reshim 2>/dev/null || true
+                    _ensure_mise_env
+                    echo -e "${GREEN}✅ ${tool}@${custom_ver} 处理完成！${NC}"
+                else
+                    echo -e "${RED}❌ 安装过程出现错误。${NC}"
+                fi
+                read -p "按回车键继续..." -r < /dev/tty
+                ;;
+            3)
+                echo ""
+                echo -e "${BLUE}⏳ 正在查询 ${tool} 远程可用版本清单 (可能需要数秒)...${NC}"
+                local remote_list
+                remote_list=$(mise ls-remote "$tool" 2>/dev/null | tail -n 25 || true)
+                if [ -n "$remote_list" ]; then
+                    echo -e "${GREEN}远程可用版本 (最新25个):${NC}"
+                    echo "$remote_list" | sed 's/^/  /'
+                else
+                    echo -e "${YELLOW}未能获取到远程版本，请检查网络连接。${NC}"
+                fi
+                read -p "按回车键继续..." -r < /dev/tty
+                ;;
+            4)
+                echo ""
+                read -p "请输入要激活为全局默认的版本号: " switch_ver < /dev/tty
+                if [ -n "$switch_ver" ]; then
+                    if mise use -g "${tool}@${switch_ver}"; then
+                        mise reshim 2>/dev/null || true
+                        _ensure_mise_env
+                        echo -e "${GREEN}✅ 全局默认版本已成功切换为: ${tool}@${switch_ver}${NC}"
+                    else
+                        echo -e "${RED}❌ 切换失败，请确认该版本是否已安装。${NC}"
+                    fi
+                fi
+                read -p "按回车键继续..." -r < /dev/tty
+                ;;
+            5)
+                echo ""
+                read -p "请输入要卸载的版本号: " uninst_ver < /dev/tty
+                if [ -n "$uninst_ver" ]; then
+                    echo -e "⏳ 正在卸载 ${tool}@${uninst_ver}..."
+                    mise uninstall "${tool}@${uninst_ver}"
+                    mise reshim 2>/dev/null || true
+                    echo -e "${GREEN}✅ 卸载完成。${NC}"
+                fi
+                read -p "按回车键继续..." -r < /dev/tty
+                ;;
+            0)
+                break
+                ;;
+            *)
+                echo -e "${RED}输入有误，请输入 0-5 之间的数字。${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# 8. 一键快捷部署核心四大语言开发环境组合
+_mise_install_all_recommended() {
+    clear
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "${CYAN}   ⚡ 一键快捷部署推荐开发组合 (Java+Node+Go+Python)   ${NC}"
+    echo -e "${CYAN}======================================================${NC}"
+    _ensure_mise_env
+
+    if ! command -v mise &>/dev/null; then
+        echo -e "${YELLOW}未检测到 Mise，正在自动执行一键安装...${NC}"
+        _mise_install_core
+        _ensure_mise_env
+    fi
+
+    echo -e "本次将自动下载并全局部署以下主流企业级稳定版本:"
+    echo -e "  - ${CYAN}Java${NC}   : 21 (Temurin / Adoptium LTS)"
+    echo -e "  - ${CYAN}Node.js${NC}: lts (稳定长期支持版)"
+    echo -e "  - ${CYAN}Go${NC}     : latest (稳定最新版)"
+    echo -e "  - ${CYAN}Python${NC} : 3.12 (现代化标准版本)"
+    echo ""
+    read -p "是否立即开始批量安装并设为全局默认? [y/N]: " confirm_all < /dev/tty
+    if [[ ! "$confirm_all" =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}已取消一键安装。${NC}"
+        read -p "按回车键返回..." -r < /dev/tty
+        return 0
+    fi
+
+    # 1. 编译依赖安装
+    _ensure_runtime_build_deps "python"
+
+    # 2. 依次安装并全局生效
+    echo -e "${BLUE}[1/4] 正在安装 Java 21 LTS...${NC}"
+    mise use -g java@21 || echo -e "${YELLOW}Java 安装过程异常，继续后续流程...${NC}"
+
+    echo -e "${BLUE}[2/4] 正在安装 Node.js LTS...${NC}"
+    mise use -g node@lts || echo -e "${YELLOW}Node.js 安装过程异常，继续后续流程...${NC}"
+
+    echo -e "${BLUE}[3/4] 正在安装 Go latest...${NC}"
+    mise use -g go@latest || echo -e "${YELLOW}Go 安装过程异常，继续后续流程...${NC}"
+
+    echo -e "${BLUE}[4/4] 正在安装 Python 3.12...${NC}"
+    mise use -g python@3.12 || echo -e "${YELLOW}Python 安装过程异常，继续后续流程...${NC}"
+
+    mise reshim 2>/dev/null || true
+    _ensure_mise_env
+
+    echo ""
+    echo -e "${GREEN}✅ 一键装机流程执行完毕！状态概览:${NC}"
+    _mise_view_status
+}
+
+# 9. 卸载 Mise
+_mise_uninstall_core() {
+    clear
+    echo -e "${RED}======================================================${NC}"
+    echo -e "${RED}             🗑  卸载与清理 Mise 环境                 ${NC}"
+    echo -e "${RED}======================================================${NC}"
+    echo -e "${YELLOW}警告: 此操作将移除 Mise 可执行文件并可选择清理所有已安装的运行时环境！${NC}"
+    read -p "是否确认卸载 Mise? [y/N]: " un_confirm < /dev/tty
+    if [[ "$un_confirm" =~ ^[Yy]$ ]]; then
+        rm -f /usr/local/bin/mise "$HOME/.local/bin/mise" /etc/profile.d/mise.sh 2>/dev/null
+        read -p "是否彻底删除 Mise 运行时数据与缓存 (~/.local/share/mise)? [y/N]: " rm_data < /dev/tty
+        if [[ "$rm_data" =~ ^[Yy]$ ]]; then
+            rm -rf "$HOME/.local/share/mise" "$HOME/.config/mise" 2>/dev/null
+            echo -e "${GREEN}✓ Mise 数据与缓存已彻底清除。${NC}"
+        fi
+        echo -e "${GREEN}✅ Mise 已从系统中卸载。${NC}"
+    else
+        echo -e "${BLUE}已取消卸载。${NC}"
+    fi
+    read -p "按回车键继续..." -r < /dev/tty
+}
+
+# ================================================================
+# Mise 多运行时环境管理 (专属二级子菜单)
+# ================================================================
+_mise_management_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}======================================================${NC}"
+        echo -e "${CYAN}       🧰 Mise 多运行时环境管理 (Java/Node/Go/Py)      ${NC}"
+        echo -e "${CYAN}======================================================${NC}"
+        _ensure_mise_env
+
+        local mise_ver="未安装"
+        if command -v mise &>/dev/null; then
+            mise_ver="$(mise --version 2>/dev/null || echo '已就绪')"
+        fi
+        echo -e "当前系统类型: ${GREEN}${DISTRO_NAME:-未知}${NC} | Mise 状态: ${CYAN}${mise_ver}${NC}"
+        echo ""
+        echo -e " 1. 🚀 安装 / 更新 Mise 核心程序  (官方脚本/多架构/自动激活)"
+        echo -e " 2. ⚙️  配置 Mise 环境与国内镜像源 (Go/NPM/Pip加速/Shims配置)"
+        echo -e " 3. 🔍 查看当前版本与运行状态     (mise ls / current / 环境变量)"
+        echo -e " ----------------------------------------------------"
+        echo -e " 4. ☕ 管理 Java 环境             (Java 8/11/17/21/自定义版本)"
+        echo -e " 5. 🟢 管理 Node.js 环境          (Node 18/20/22/LTS/自定义版本)"
+        echo -e " 6. 🔵 管理 Go 环境               (Go 1.21/1.22/1.23/自定义版本)"
+        echo -e " 7. 🐍 管理 Python 环境           (Python 3.10/3.11/3.12/编译依赖)"
+        echo -e " ----------------------------------------------------"
+        echo -e " 8. ⚡ 一键装机推荐组合           (Java+Node+Go+Python 一键就绪)"
+        echo -e " 9. 🗑  卸载与清理 Mise"
+        echo -e " 0. 返回上一级菜单"
+        echo -e "${CYAN}======================================================${NC}"
+        read -p "请选择操作 [0-9]: " mise_choice < /dev/tty
+
+        case $mise_choice in
+            1)
+                _mise_install_core
+                ;;
+            2)
+                _mise_config_env
+                ;;
+            3)
+                _mise_view_status
+                ;;
+            4)
+                _manage_mise_tool "java" "Java (JDK)" "21,17,11,8"
+                ;;
+            5)
+                _manage_mise_tool "node" "Node.js" "lts,22,20,18"
+                ;;
+            6)
+                _manage_mise_tool "go" "Go (Golang)" "latest,1.23,1.22,1.21"
+                ;;
+            7)
+                _manage_mise_tool "python" "Python" "3.12,3.11,3.10"
+                ;;
+            8)
+                _mise_install_all_recommended
+                ;;
+            9)
+                _mise_uninstall_core
+                ;;
+            0)
+                break
+                ;;
+            *)
+                echo -e "${RED}输入有误，请输入 0-9 之间的数字。${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# ================================================================
 # 常用专家工具集安装 (二级菜单)
 # 选项 1: 采集离线安装包 (需联网, 供无网服务器使用)
 # 选项 2: 直接在线安装常用工具集 (联网在线安装, 不处理离线)
 # 选项 3: 本地离线安装常用工具集 (无网服务器专用, 从本地部署)
+# 选项 4: Mise 多运行时环境管理 (安装/配置/版本查看/管理 Java, Node, Go, Python)
 # ================================================================
 install_common_tools() {
     # Root 权限检查
@@ -1127,9 +1712,10 @@ install_common_tools() {
         echo -e " 1. 📦 采集离线安装包到本地 (需联网, 供无网服务器使用)"
         echo -e " 2. 🚀 直接安装常用工具集   (直接在线联网安装, 不处理离线)"
         echo -e " 3. 💾 本地离线安装工具集   (无网服务器使用本地离线包部署)"
+        echo -e " 4. 🧰 Mise 多运行时环境管理 (安装/配置/版本查看/管理 Java Node Go Python)"
         echo -e " 0. 返回主菜单"
         echo -e "${CYAN}======================================================${NC}"
-        read -p "请选择操作 [0-3]: " tool_choice < /dev/tty
+        read -p "请选择操作 [0-4]: " tool_choice < /dev/tty
 
         case $tool_choice in
             1)
@@ -1141,11 +1727,14 @@ install_common_tools() {
             3)
                 _install_offline_packages_local
                 ;;
+            4)
+                _mise_management_menu
+                ;;
             0)
                 break
                 ;;
             *)
-                echo -e "${RED}输入有误，请输入 0-3 之间的数字。${NC}"
+                echo -e "${RED}输入有误，请输入 0-4 之间的数字。${NC}"
                 sleep 1
                 ;;
         esac

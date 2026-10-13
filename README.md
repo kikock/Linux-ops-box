@@ -30,7 +30,7 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 |:---:|:---|:---|:---|
 | 1 | **系统软件包更新** | 依赖清理 / 内核升级 | `system_opt.sh` |
 | 2 | **系统环境深度优化** | 换源 / BBR / Swap / 挂载 / 代理 | `system_opt.sh` |
-| 3 | **常用专家工具集** | 采集离线包 / 在线安装 / 本地离线部署 (最小化系统必备) | `system_opt.sh` |
+| 3 | **常用专家工具集** | 采集离线包 / 在线安装 / 本地离线部署 / Mise 多运行时管理 (Java/Node/Go/Python) | `system_opt.sh` |
 | 4 | **SSH 远程安全加固** | 证书登录 / 端口自定义 / 防爆破 / 服务状态监控 / 一键重启与安装 | `ssh_sec.sh` |
 | 5 | **防火墙安全管理** | UFW / FirewallD TUI 管理 | `firewall_mgmt.sh` |
 | 6 | **网络 IP 与网卡诊断** | 静态 IP / 路由 / 网卡信息 | `network.sh` |
@@ -223,7 +223,30 @@ system/db_manager/
 
 ---
 
-## 📦 8. 离线安装与内置工具包体系 (system/packages)
+## 🧰 8. Mise 多运行时管理中心 (system_opt.sh)
+
+已内置于 `ck_sysinit` 主菜单 **「3. 常用专家工具集安装」** 之 **「4. Mise 多运行时环境管理」**。基于 Rust 构建的现代极速环境管理器 **Mise**（前身为 rtx），可一站式无缝取代 SDKMAN、nvm、gvm、pyenv。
+
+### 核心特性:
+
+1. **一键极速安装与自动激活**:
+   - 自动探测多架构二进制并安装至 `/usr/local/bin/mise`，支持官方渠道与国内 GitHub 加速镜像拉取。
+   - 自动配置 `/etc/profile.d/mise.sh` 与用户 `~/.bashrc`，实现系统级无感激活与 Shims 软链接管理。
+2. **国内语言镜像源一键加速**:
+   - 联动配置 Go 模块代理 (`https://goproxy.cn,direct`)、NPM 镜像源 (`https://registry.npmmirror.com`) 与 Python Pip 清华大学开源镜像源。
+3. **版本查看与健康自检**:
+   - 实时查询 Mise 核心版本、已安装清单 (`mise ls`)、全局生效版本 (`mise current`) 以及当前终端实际解析命令的执行输出。
+4. **多语言一站式生命周期管理**:
+   - **Java (JDK)**: 预置 LTS 版本推荐（Java 8, 11, 17, 21），支持 Adoptium/Temurin 等上游二进制自动获取与全局切换。
+   - **Node.js**: 预置稳定支持版本推荐（Node.js 18, 20, 22, LTS），自动接管 npm 环境。
+   - **Go (Golang)**: 预置官方稳定版推荐（Go 1.21, 1.22, 1.23, latest），开箱即用。
+   - **Python**: 自动预检并补齐底层编译与系统依赖库（gcc, openssl, zlib, ffi），支持 Python 3.10, 3.11, 3.12 及自定义版本。
+5. **企业级一键四件套打包部署**:
+   - 提供「Java 21 + Node.js LTS + Go latest + Python 3.12」组合一键并行拉取并设定为系统全局环境。
+
+---
+
+## 📦 9. 离线安装与内置工具包体系 (system/packages)
 
 针对物理隔离、内网断网环境或海外源受限场景，本工具箱提供 **代码免网部署** 与 **底层工具离线 deb/rpm 包预置** 的双重保障。
 
@@ -254,7 +277,7 @@ sudo bash install_system.sh
 
 ---
 
-## ⌨️ 9. 命令行参数 (CLI)
+## ⌨️ 10. 命令行参数 (CLI)
 
 `ck_sysinit` 支持以下命令行参数，可在任意目录直接执行：
 
@@ -276,7 +299,7 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 
 ---
 
-## 🛠 10. 开发扩展说明 (Developer Guide)
+## 🛠 11. 开发扩展说明 (Developer Guide)
 
 本工具箱采用高度模块化的 Shell 函数架构，极易进行二次开发。
 
@@ -298,7 +321,7 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 
 ---
 
-## 🚀 11. 后续更新计划 (Roadmap)
+## 🚀 12. 后续更新计划 (Roadmap)
 
 我们致力于将 `Linux-ops-box` 打造为最懂运维、最轻量的 TUI 工具箱。
 
