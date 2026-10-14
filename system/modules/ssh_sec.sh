@@ -26,16 +26,90 @@ change_user_password() {
 # 2.2 开启 Root SSH 登录
 enable_root_ssh() {
     echo -e "\n${BLUE}--- 开启 Root SSH 远程登录 ---${NC}"
+    if [ ! -f /etc/ssh/sshd_config ]; then
+        echo -e "${RED}错误: 未检测到 /etc/ssh/sshd_config 文件，请确认 SSH 服务已安装。${NC}"
+        read -p "按回车键继续..."
+        return 1
+    fi
+
     echo -e "${YELLOW}正在修改 SSH 配置文件...${NC}"
     cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%F_%T)
-    sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-    sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+
+    # 替换或添加 PermitRootLogin yes
+    if grep -qE '^#?PermitRootLogin' /etc/ssh/sshd_config; then
+        sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+    else
+        echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
+    fi
+
+    # 确保密码认证开启
+    if grep -qE '^#?PasswordAuthentication' /etc/ssh/sshd_config; then
+        sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    else
+        echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
+    fi
+
+    # 兼容高版本发行版（如 Ubuntu 22.04+）中 sshd_config.d 子配置覆盖问题
+    if [ -d /etc/ssh/sshd_config.d ]; then
+        for conf in /etc/ssh/sshd_config.d/*.conf; do
+            [ -f "$conf" ] || continue
+            sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' "$conf" 2>/dev/null || true
+        done
+    fi
 
     # 统一使用封装的跨平台重启函数
-    _svc_restart "$SVC_SSH"
+    local ssh_svc="${SVC_SSH:-$(_detect_ssh_service_name)}"
+    _svc_restart "$ssh_svc"
 
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}成功: 已允许 Root 账号通过密码进行 SSH 远程登录。${NC}"
+    else
+        echo -e "${RED}错误: SSH 服务重启失败，请手动检查。${NC}"
+    fi
+    read -p "按回车键继续..."
+}
+
+# 2.3 取消/禁止 Root SSH 登录
+disable_root_ssh() {
+    echo -e "\n${BLUE}--- 取消/禁止 Root SSH 远程登录 ---${NC}"
+    if [ ! -f /etc/ssh/sshd_config ]; then
+        echo -e "${RED}错误: 未检测到 /etc/ssh/sshd_config 文件，请确认 SSH 服务已安装。${NC}"
+        read -p "按回车键继续..."
+        return 1
+    fi
+
+    echo -e "${YELLOW}⚠️  警告: 禁止 Root 登录前，请确认当前系统已存在其他可用 sudo 用户或已配置免密密钥，避免失联！${NC}"
+    read -p "是否确认禁用 Root SSH 登录? (y/n): " confirm_disable
+    if [[ "$confirm_disable" != "y" && "$confirm_disable" != "Y" ]]; then
+        echo -e "${YELLOW}操作已取消。${NC}"
+        read -p "按回车键继续..."
+        return 0
+    fi
+
+    echo -e "${YELLOW}正在修改 SSH 配置文件...${NC}"
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%F_%T)
+
+    # 替换或添加 PermitRootLogin no
+    if grep -qE '^#?PermitRootLogin' /etc/ssh/sshd_config; then
+        sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+    else
+        echo "PermitRootLogin no" >> /etc/ssh/sshd_config
+    fi
+
+    # 兼容高版本发行版中 sshd_config.d 子配置覆盖问题
+    if [ -d /etc/ssh/sshd_config.d ]; then
+        for conf in /etc/ssh/sshd_config.d/*.conf; do
+            [ -f "$conf" ] || continue
+            sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' "$conf" 2>/dev/null || true
+        done
+    fi
+
+    # 统一使用封装的跨平台重启函数
+    local ssh_svc="${SVC_SSH:-$(_detect_ssh_service_name)}"
+    _svc_restart "$ssh_svc"
+
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}成功: 已禁止 Root 账号通过 SSH 远程登录 (PermitRootLogin no)。${NC}"
     else
         echo -e "${RED}错误: SSH 服务重启失败，请手动检查。${NC}"
     fi
@@ -923,7 +997,7 @@ manage_ssh_service() {
     done
 }
 
-# 2.7 SSH 管理总入口 (二级菜单)
+# 2.8 SSH 管理总入口 (二级菜单)
 ssh_menu() {
     while true; do
         clear
@@ -932,21 +1006,23 @@ ssh_menu() {
         echo -e "${GREEN}==============================================${NC}"
         echo " 1. 修改用户密码 (可指定任意账号)"
         echo " 2. 开启 Root SSH 远程登录"
-        echo " 3. 生成 SSH 公私钥对 (保存至 /data/ssh_key)"
-        echo " 4. SSH 证书管理 (authorized_keys)"
-        echo " 5. SSH 配置巡检 (端口/认证/公钥/服务状态)"
-        echo " 6. SSH 服务管理中心 (状态/启动/重启/自启/安装)"
+        echo " 3. 取消/禁止 Root SSH 远程登录"
+        echo " 4. 生成 SSH 公私钥对 (保存至 /data/ssh_key)"
+        echo " 5. SSH 证书管理 (authorized_keys)"
+        echo " 6. SSH 配置巡检 (端口/认证/公钥/服务状态)"
+        echo " 7. SSH 服务管理中心 (状态/启动/重启/自启/安装)"
         echo " 0. 返回主菜单"
         echo -e "${GREEN}==============================================${NC}"
-        read -p "请选择操作 [0-6]: " ssh_main_choice
+        read -p "请选择操作 [0-7]: " ssh_main_choice
 
         case $ssh_main_choice in
             1) change_user_password ;;
             2) enable_root_ssh ;;
-            3) generate_ssh_keypair ;;
-            4) manage_ssh_certs ;;
-            5) check_ssh_config ;;
-            6) manage_ssh_service ;;
+            3) disable_root_ssh ;;
+            4) generate_ssh_keypair ;;
+            5) manage_ssh_certs ;;
+            6) check_ssh_config ;;
+            7) manage_ssh_service ;;
             0) break ;;
             *) echo -e "${RED}无效输入。${NC}"; sleep 1 ;;
         esac
