@@ -90,7 +90,7 @@ check_jq() {
         elif command -v yum &>/dev/null; then yum install -y jq &>/dev/null
         elif command -v dnf &>/dev/null; then dnf install -y jq &>/dev/null; fi
         if ! command -v jq &>/dev/null; then
-            log_error "jq 安装失败，请手动安装: apt install jq / yum install jq"; exit 1
+            log_error "jq 安装失败，请手动安装: apt install jq / yum install jq"; return 1
         fi
         log_info "jq 安装成功"
     fi
@@ -2087,7 +2087,7 @@ main_menu() {
         echo -e "  ${GREEN}[3]${NC} 管理数据库连接配置"
         echo -e "  ${GREEN}[4]${NC} 定时备份管理"
         echo -e "  ${GREEN}[5]${NC} 数据表归档管理"
-        echo -e "  ${RED}[0]${NC} 退出"
+        echo -e "  ${RED}[0]${NC} 返回主菜单"
         echo ""
         read -rp "请选择操作: " choice
         case "$choice" in
@@ -2096,7 +2096,10 @@ main_menu() {
             3) config_menu ;;
             4) cron_menu ;;
             5) archive_menu ;;
-            0) echo -e "${GREEN}再见！${NC}"; exit 0 ;;
+            0)
+                echo -e "${GREEN}正在返回主菜单...${NC}"
+                break
+                ;;
             *) log_warn "无效选项，请重新选择" ;;
         esac
     done

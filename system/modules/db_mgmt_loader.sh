@@ -32,13 +32,13 @@ fi
 # 3. ck_sysinit 菜单入口对接函数
 db_management_center() {
     # 检查 jq 依赖 (common.sh 已有部分依赖检查，这里调用 db_mgmt.sh 的 check_jq)
-    check_jq
+    check_jq || return 1
     
     # 初始化配置
     init_config
     
     # 进入数据库管理主菜单
-    # 因为 db_mgmt.sh 的 main_menu 有 while true 循环，这里直接接管
+    # main_menu 内部用户选择 0 时 break 退出循环，平滑返回 ck_sysinit 主菜单
     main_menu
 }
 
