@@ -5,6 +5,12 @@
 # 功能: 提供 TUI 图形化菜单，支持 VNC 一键配置、启停、删除及自启维护
 # =================================================================
 
+# 自动探测并加载通用底座函数 (双模兼容)
+_CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$_CURRENT_DIR/common.sh" ]; then
+    source "$_CURRENT_DIR/common.sh"
+fi
+
 # 1. 扫描当前系统配置的 VNC 实例
 _vnc_scan_instances() {
     instances=()
@@ -393,3 +399,10 @@ vnc_management_center() {
         esac
     done
 }
+
+# ---------------------------------------------------------
+# 双模独立执行入口
+# ---------------------------------------------------------
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    vnc_management_center
+fi

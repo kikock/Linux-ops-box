@@ -110,6 +110,24 @@ _init_distro() {
             PKG_INSTALL="apk add"
             SVC_SSH="sshd"
             ;;
+        # ── Arch 族系 ────────────────────────────────────────────────
+        arch|manjaro|endeavouros)
+            DISTRO_FAMILY="arch"
+            PKG_MGR="pacman"
+            PKG_UPDATE="pacman -Sy"
+            PKG_UPGRADE="pacman -Syu --noconfirm"
+            PKG_INSTALL="pacman -S --noconfirm"
+            SVC_SSH="sshd"
+            ;;
+        # ── openSUSE / SLES 族系 ─────────────────────────────────────
+        opensuse*|sles)
+            DISTRO_FAMILY="suse"
+            PKG_MGR="zypper"
+            PKG_UPDATE="zypper refresh"
+            PKG_UPGRADE="zypper update -y"
+            PKG_INSTALL="zypper install -y"
+            SVC_SSH="sshd"
+            ;;
         # ── 国产信创：麒麟系 (Debian/APT 底座) ──────────────────────
         # 银河麒麟 V10/V4、Ubuntu Kylin、中标麒麟
         ubuntukylin|neokylin)
@@ -315,5 +333,95 @@ _svc_is_active() {
     fi
 }
 
+# ----------------------------------------------------------------
+# 系统并发互斥锁引擎 (flock 防多终端/定时任务竞争)
+# ----------------------------------------------------------------
+OPSBOX_LOCK_DIR="/run/lock/opsbox"
+
+_acquire_ops_lock() {
+    local lock_name="${1:-ops_system}"
+    local timeout="${2:-120}"
+    mkdir -p "$OPSBOX_LOCK_DIR" 2>/dev/null
+    local lock_file="$OPSBOX_LOCK_DIR/${lock_name}.lock"
+    local lock_fd
+    exec {lock_fd}>>"$lock_file" || return 1
+
+    if ! flock -w "$timeout" "$lock_fd"; then
+        _log_err "获取系统运维锁 [${lock_name}] 超时 (${timeout}秒)，其他操作正在执行中，请稍后重试。"
+        exec {lock_fd}>&-
+        return 1
+    fi
+    eval "OPSBOX_LOCK_FD_${lock_name}=$lock_fd"
+    return 0
+}
+
+_release_ops_lock() {
+    local lock_name="${1:-ops_system}"
+    local var_name="OPSBOX_LOCK_FD_${lock_name}"
+    local lock_fd="${!var_name}"
+    if [ -n "$lock_fd" ]; then
+        flock -u "$lock_fd" 2>/dev/null || true
+        eval "exec ${lock_fd}>&-" 2>/dev/null || true
+        unset "OPSBOX_LOCK_FD_${lock_name}"
+    fi
+}
+
+# 包装器: 在排他锁保护下执行命令 (带防死锁超时)
+_run_with_ops_lock() {
+    local lock_name="$1"
+    shift
+    if ! command -v flock &>/dev/null; then
+        "$@"
+        return $?
+    fi
+    _acquire_ops_lock "$lock_name" 120 || return 1
+    local ret=0
+    "$@" || ret=$?
+    _release_ops_lock "$lock_name"
+    return $ret
+}
+
+# ----------------------------------------------------------------
+# 全局统一软件包安装器 (支持跨多包管理器)
+# ----------------------------------------------------------------
+_pkg_install_universal() {
+    [ $# -eq 0 ] && return 0
+    local to_install=()
+    for pkg in "$@"; do
+        if ! command -v "$pkg" &>/dev/null; then
+            to_install+=("$pkg")
+        fi
+    done
+    [ ${#to_install[@]} -eq 0 ] && return 0
+
+    _run_with_ops_lock "pkg_mgr" ${PKG_INSTALL:-apt install -y} "${to_install[@]}"
+}
+
+# ----------------------------------------------------------------
+# 系统级磁盘空间预检机制 (防止软件安装写满分区)
+# ----------------------------------------------------------------
+_check_disk_space() {
+    local required_mb="${1:-1024}"
+    local target_path="${2:-/var}"
+    [ ! -d "$target_path" ] && target_path="/"
+
+    local avail_kb
+    avail_kb=$(df -k "$target_path" 2>/dev/null | awk 'NR==2 {print $4}')
+    if [ -n "$avail_kb" ]; then
+        local avail_mb=$((avail_kb / 1024))
+        if [ "$avail_mb" -lt "$required_mb" ]; then
+            echo -e "${RED}⚠️ 警告: 目标分区 (${target_path}) 剩余可用空间仅 ${avail_mb}MB，低于建议安全阈值 ${required_mb}MB！${NC}"
+            echo -e "${YELLOW}若继续安装可能导致磁盘空间写满、包管理器锁定或服务异常。${NC}"
+            read -p "是否仍然强制继续执行？[y/N]: " force_yn < /dev/tty
+            if [[ ! "$force_yn" =~ ^[Yy]$ ]]; then
+                echo -e "${BLUE}已取消安装操作。${NC}"
+                return 1
+            fi
+        fi
+    fi
+    return 0
+}
+
 # --- Module Auto-Start Initialization ---
 _init_distro
+

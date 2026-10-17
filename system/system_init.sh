@@ -28,44 +28,38 @@ else
     exit 1
 fi
 
-# 引入下属模块
-if [ -f "$BASE_DIR/modules/ssh_sec.sh" ]; then
-    source "$BASE_DIR/modules/ssh_sec.sh"
-fi
+# ================================================================
+# 微内核动态按需加载引擎 (Dynamic Lazy-Loading Engine)
+# 特性: 拒绝启动时全量无脑 Source，仅在用户触发具体功能时动态载入
+# ================================================================
+_load_module() {
+    local mod_name="$1"
+    # 查找顺序: 当前相对目录 -> /opt/ck_sysinit 物理目录
+    local mod_file=""
+    local candidates=(
+        "$BASE_DIR/modules/${mod_name}.sh"
+        "/opt/ck_sysinit/system/modules/${mod_name}.sh"
+        "/opt/ck_sysinit/modules/${mod_name}.sh"
+    )
 
-if [ -f "$BASE_DIR/modules/network.sh" ]; then
-    source "$BASE_DIR/modules/network.sh"
-fi
-if [ -f "$BASE_DIR/modules/nginx_view.sh" ]; then
-    source "$BASE_DIR/modules/nginx_view.sh"
-fi
-if [ -f "$BASE_DIR/modules/system_opt.sh" ]; then
-    source "$BASE_DIR/modules/system_opt.sh"
-fi
-if [ -f "$BASE_DIR/modules/firewall_mgmt.sh" ]; then
-    source "$BASE_DIR/modules/firewall_mgmt.sh"
-fi
-if [ -f "$BASE_DIR/modules/db_mgmt_loader.sh" ]; then
-    source "$BASE_DIR/modules/db_mgmt_loader.sh"
-fi
-if [ -f "$BASE_DIR/modules/docker_mgmt.sh" ]; then
-    source "$BASE_DIR/modules/docker_mgmt.sh"
-fi
-if [ -f "$BASE_DIR/modules/vnc_mgmt.sh" ]; then
-    source "$BASE_DIR/modules/vnc_mgmt.sh"
-fi
-if [ -f "$BASE_DIR/modules/disk_mgmt.sh" ]; then
-    source "$BASE_DIR/modules/disk_mgmt.sh"
-fi
-if [ -f "$BASE_DIR/modules/ssl_cert.sh" ]; then
-    source "$BASE_DIR/modules/ssl_cert.sh"
-fi
-if [ -f "$BASE_DIR/modules/acme.sh" ]; then
-    source "$BASE_DIR/modules/acme.sh"
-fi
-if [ -f "$BASE_DIR/modules/time_mgmt.sh" ]; then
-    source "$BASE_DIR/modules/time_mgmt.sh"
-fi
+    for c in "${candidates[@]}"; do
+        if [ -f "$c" ]; then
+            mod_file="$c"
+            break
+        fi
+    done
+
+    if [ -n "$mod_file" ] && [ -f "$mod_file" ]; then
+        source "$mod_file"
+        return 0
+    else
+        _log_err "无法加载微服务模块 [${mod_name}]，未找到对应模块文件。"
+        echo -e "${RED}错误: 无法加载微服务模块: ${mod_name}${NC}"
+        echo -e "已搜索路径: ${candidates[*]}"
+        read -p "按回车键返回..." -r < /dev/tty
+        return 1
+    fi
+}
 
 # ================================================================
 # 1. 静态环境参数自检 (只在启动时检索 1 次，缓存以提升性能)
@@ -388,6 +382,8 @@ while true; do
     echo " 13. 硬盘检测与清理中心   (使用率/大文件/大目录/清理)"
     echo -e "${GREEN}══════════════ ⏰  时间管理中心 ══════════════${NC}"
     echo " 14. 系统时间管理中心     (时区/RTC硬件时钟/NTP服务/开机同步)"
+    echo -e "${GREEN}══════════════ 📢  监控告警中心 ══════════════${NC}"
+    echo " 15. Telegram 运维告警中心 (Bot消息/资源超限/磁盘告警)"
     echo -e "${GREEN}══════════════ ⚙   工具箱管理   ══════════════${NC}"
     echo -e "${YELLOW} 88. ♻  在线更新工具箱${NC}"
     echo -e "${RED} 99. 🗑  卸载此工具箱${NC}"
@@ -396,16 +392,16 @@ while true; do
     read -p "请输入指令编号: " choice < /dev/tty
 
     case $choice in
-        1)  update_system_packages ;;
-        2)  system_optimization_menu ;;
-        3)  install_common_tools ;;
-        4)  ssh_menu ;;
-        5)  firewall_menu ;;
-        6)  network_menu ;;
-        7)  nginx_menu ;;
-        8)  db_management_center ;;
-        9)  docker_management_center ;;
-        10) vnc_management_center ;;
+        1)  _load_module system_opt && update_system_packages ;;
+        2)  _load_module system_opt && system_optimization_menu ;;
+        3)  _load_module system_opt && install_common_tools ;;
+        4)  _load_module ssh_sec && ssh_menu ;;
+        5)  _load_module firewall_mgmt && firewall_menu ;;
+        6)  _load_module network && network_menu ;;
+        7)  _load_module nginx_view && nginx_menu ;;
+        8)  _load_module db_mgmt_loader && db_management_center ;;
+        9)  _load_module docker_mgmt && docker_management_center ;;
+        10) _load_module vnc_mgmt && vnc_management_center ;;
         11)
             local proxy_script="$BASE_DIR/setup_proxy_registry.sh"
             if [ ! -f "$proxy_script" ]; then
@@ -418,9 +414,10 @@ while true; do
                 read -p "按回车键继续..."
             fi
             ;;
-        12) ssl_cert_menu ;;
-        13) disk_management_center ;;
-        14) time_management_menu ;;
+        12) _load_module ssl_cert && ssl_cert_menu ;;
+        13) _load_module disk_mgmt && disk_management_center ;;
+        14) _load_module time_mgmt && time_management_menu ;;
+        15) _load_module notify && notify_menu ;;
         88) _update_toolbox ;;
         99)
             echo -e "${YELLOW}警告: 即将执行彻底卸载程序...${NC}"

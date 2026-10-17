@@ -18,8 +18,11 @@
 CERT_BASE_DIR="/etc/ssl/ops_certs"
 ACME_CERT_DIR="/root/kikock"
 
-# 引入 ACME 模块
+# 引入 ACME 模块与通用底座
 _SSL_MODULE_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+if [ -f "$_SSL_MODULE_DIR/common.sh" ]; then
+    source "$_SSL_MODULE_DIR/common.sh"
+fi
 if [ -f "$_SSL_MODULE_DIR/acme.sh" ]; then
     source "$_SSL_MODULE_DIR/acme.sh"
 fi
@@ -1015,3 +1018,10 @@ ssl_cert_menu() {
         esac
     done
 }
+
+# ---------------------------------------------------------
+# 双模独立执行入口
+# ---------------------------------------------------------
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    ssl_cert_menu
+fi

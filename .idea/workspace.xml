@@ -4,7 +4,22 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="2fd15132-d902-4914-bfb1-624deecd9e32" name="更改" comment="feat(db_mgmt):证书模块" />
+    <list default="true" id="2fd15132-d902-4914-bfb1-624deecd9e32" name="更改" comment="feat(db_mgmt):证书模块">
+      <change beforePath="$PROJECT_DIR$/system/modules/acme.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/acme.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system/modules/common.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/common.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system/modules/db_mgmt_loader.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/db_mgmt_loader.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system/modules/disk_mgmt.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/disk_mgmt.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system/modules/docker_mgmt.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/docker_mgmt.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system/modules/firewall_mgmt.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/firewall_mgmt.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system/modules/network.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/network.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system/modules/nginx_view.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/nginx_view.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system/modules/ssh_sec.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/ssh_sec.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system/modules/ssl_cert.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/ssl_cert.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system/modules/system_opt.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/system_opt.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system/modules/time_mgmt.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/time_mgmt.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system/modules/vnc_mgmt.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/vnc_mgmt.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/system/system_init.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/system_init.sh" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -51,12 +66,12 @@
       </RecentBranches>
     </option>
   </component>
-  <component name="GithubPullRequestsUISettings">{
-  &quot;selectedUrlAndAccountId&quot;: {
-    &quot;url&quot;: &quot;git@github.com:kikock/Linux-ops-box.git&quot;,
-    &quot;accountId&quot;: &quot;a930c8d1-b487-4d74-811d-d116106e78f2&quot;
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/kikock/Linux-ops-box.git",
+    "accountId": "a930c8d1-b487-4d74-811d-d116106e78f2"
   }
-}</component>
+}]]></component>
   <component name="KotlinCodeInsightWorkspaceSettings">
     <option name="optimizeImportsOnTheFly" value="true" />
   </component>
@@ -68,26 +83,29 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;SHELLCHECK.PATH&quot;: &quot;D:\\developmentTool\\ideaIU\\.IntelliJIdea\\plugins\\Shell Script\\shellcheck.exe&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
-    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;C:/Users/kikock/Desktop/tkcloud/Linux-ops-box&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.keymap&quot;,
-    &quot;typescript.add.unambiguous.imports.on.the.fly&quot;: &quot;true&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "SHELLCHECK.PATH": "D:\\developmentTool\\ideaIU\\.IntelliJIdea\\plugins\\Shell Script\\shellcheck.exe",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "main",
+    "ignore.virus.scanning.warn.message": "true",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "D:/kikock_poject/Linux-ops-box",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "python.packages.toolwindow.project.migrated.to.right.top.v2": "true",
+    "settings.editor.selected.configurable": "preferences.keymap",
+    "typescript.add.unambiguous.imports.on.the.fly": "true",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RebelAgentSelection">
     <selection>jr</selection>
   </component>
@@ -99,8 +117,8 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-jdk-9823dce3aa75-bf35d07a577b-intellij.indexing.shared.core-IU-252.23892.409" />
-        <option value="bundled-js-predefined-d6986cc7102b-e03c56caf84a-JavaScript-IU-252.23892.409" />
+        <option value="bundled-jdk-30f59d01ecdd-a203e0a19954-intellij.indexing.shared.core-IU-262.10968.63" />
+        <option value="bundled-js-predefined-d6986cc7102b-4abd2a77f808-JavaScript-IU-262.10968.63" />
       </set>
     </attachedChunks>
   </component>

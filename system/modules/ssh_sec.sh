@@ -1,3 +1,29 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Linux-ops-box SSH 远程连接与安全加固中心 (ssh_sec.sh)
+# 支持独立单兵运行与主程序微内核懒加载
+# ==============================================================================
+
+# 底座依赖自探测
+if ! declare -f _log_info &>/dev/null; then
+    _COMMON_PATHS=(
+        "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+        "/opt/ck_sysinit/system/modules/common.sh"
+        "/opt/ck_sysinit/modules/common.sh"
+    )
+    for _c in "${_COMMON_PATHS[@]}"; do
+        if [ -f "$_c" ]; then source "$_c"; break; fi
+    done
+fi
+
+# 基础颜色兜底
+GREEN="${GREEN:-\033[0;32m}"
+BLUE="${BLUE:-\033[0;34m}"
+RED="${RED:-\033[0;31m}"
+YELLOW="${YELLOW:-\033[1;33m}"
+CYAN="${CYAN:-\033[0;36m}"
+NC="${NC:-\033[0m}"
+
 # 2.1 修改账号密码 (支持指定任意账号)
 change_user_password() {
     echo -e "\n${BLUE}--- 修改账号密码 ---${NC}"
@@ -670,8 +696,13 @@ manage_ssh_service() {
         # ── 实时状态展示 ──────────────────────────────────────────
         local _installed=false _running=false _enabled=false _svc_name=""
 
-        # 检测安装状态 (sshd_config 存在或 sshd 命令存在)
-        if [ -f /etc/ssh/sshd_config ] || command -v sshd &>/dev/null; then
+        # 检测安装状态 (多维兜底：包级别查询 > 路径直判 > 命令 > 配置文件)
+        # 优先用包管理器做权威查询，不受 PATH 和配置文件初始化状态影响
+        if dpkg -l openssh-server 2>/dev/null | grep -q '^ii' || \
+           rpm -q openssh-server &>/dev/null 2>&1 || \
+           [ -x /usr/sbin/sshd ] || \
+           [ -f /etc/ssh/sshd_config ] || \
+           command -v sshd &>/dev/null; then
             _installed=true
         fi
 
@@ -1028,5 +1059,10 @@ ssh_menu() {
         esac
     done
 }
+
+# 双模运行守卫: 支持被主程序 source 引用或独立单兵执行
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    ssh_menu
+fi
 
 

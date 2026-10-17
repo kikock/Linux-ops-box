@@ -1,3 +1,28 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Linux-ops-box 网络 IP 与网卡诊断中心 (network.sh)
+# 支持独立单兵运行与主程序微内核懒加载
+# ==============================================================================
+
+# 底座依赖自探测
+if ! declare -f _log_info &>/dev/null; then
+    _COMMON_PATHS=(
+        "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+        "/opt/ck_sysinit/system/modules/common.sh"
+        "/opt/ck_sysinit/modules/common.sh"
+    )
+    for _c in "${_COMMON_PATHS[@]}"; do
+        if [ -f "$_c" ]; then source "$_c"; break; fi
+    done
+fi
+
+GREEN="${GREEN:-\033[0;32m}"
+BLUE="${BLUE:-\033[0;34m}"
+RED="${RED:-\033[0;31m}"
+YELLOW="${YELLOW:-\033[1;33m}"
+CYAN="${CYAN:-\033[0;36m}"
+NC="${NC:-\033[0m}"
+
 show_network_info() {
     clear
     echo -e "${BLUE}================ 当前网络配置信息 ================${NC}"
@@ -398,31 +423,193 @@ manage_nat_forwarding() {
     fi
     read -p "按回车键返回二级菜单..." < /dev/tty
 }
+# ==============================================================
+# 优化 DNS 地址配置模块 (国内外优化/手动编辑)
+# ==============================================================
+optimize_dns_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}------------------------${NC}"
+        echo -e "${YELLOW}当前DNS地址${NC}"
+        if [ -f /etc/resolv.conf ]; then
+            cat /etc/resolv.conf
+        else
+            echo -e "${RED}未检测到 /etc/resolv.conf 配置文件${NC}"
+        fi
+        echo -e "${CYAN}------------------------${NC}"
+        echo ""
+        echo -e " 1. 国外DNS优化:"
+        echo -e "    v4: 1.1.1.1 8.8.8.8"
+        echo -e "    v6: 2606:4700:4700::1111 2001:4860:4860::8888"
+        echo ""
+        echo -e " 2. 国内DNS优化:"
+        echo -e "    v4: 223.5.5.5 183.60.83.19"
+        echo -e "    v6: 2400:3200::1 2400:da00::6666"
+        echo ""
+        echo -e " 3. 手动编辑DNS配置"
+        echo -e "${CYAN}------------------------${NC}"
+        echo -e " 0. 返回上一级选单"
+        echo -e "${CYAN}------------------------${NC}"
+        read -p "请输入你的选择: " dns_opt < /dev/tty
+
+        case "$dns_opt" in
+            1)
+                echo -e "${YELLOW}正在写入国外优化 DNS...${NC}"
+                [ -f /etc/resolv.conf ] && cp -f /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null
+                [ -L /etc/resolv.conf ] && rm -f /etc/resolv.conf
+                cat > /etc/resolv.conf <<EOF
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+nameserver 2606:4700:4700::1111
+nameserver 2001:4860:4860::8888
+options timeout:2 attempts:3 rotate
+EOF
+                echo -e "${GREEN}✅ 成功: 国外 DNS 配置已应用。${NC}"
+                sleep 1.2
+                ;;
+            2)
+                echo -e "${YELLOW}正在写入国内优化 DNS...${NC}"
+                [ -f /etc/resolv.conf ] && cp -f /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null
+                [ -L /etc/resolv.conf ] && rm -f /etc/resolv.conf
+                cat > /etc/resolv.conf <<EOF
+nameserver 223.5.5.5
+nameserver 183.60.83.19
+nameserver 2400:3200::1
+nameserver 2400:da00::6666
+options timeout:2 attempts:3 rotate
+EOF
+                echo -e "${GREEN}✅ 成功: 国内 DNS 配置已应用。${NC}"
+                sleep 1.2
+                ;;
+            3)
+                if command -v nano &>/dev/null; then
+                    nano /etc/resolv.conf
+                elif command -v vim &>/dev/null; then
+                    vim /etc/resolv.conf
+                else
+                    vi /etc/resolv.conf
+                fi
+                ;;
+            0)
+                break
+                ;;
+            *)
+                echo -e "${RED}输入无效，请重新选择。${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# ==============================================================================
+# IPv4 / IPv6 出站路由优先级调度中心 (/etc/gai.conf)
+# ==============================================================================
+manage_ip_priority_menu() {
+    local gai_conf="/etc/gai.conf"
+    while true; do
+        clear
+        echo -e "${CYAN}======================================================${NC}"
+        echo -e "${CYAN}        🔀 IPv4 / IPv6 出站解析优先级调度中心          ${NC}"
+        echo -e "${CYAN}======================================================${NC}"
+
+        # 探测当前状态
+        local current_mode="双栈默认 (系统标准策略)"
+        if [ -f "$gai_conf" ] && grep -qE "^[[:space:]]*precedence[[:space:]]+::ffff:0:0/96[[:space:]]+100" "$gai_conf"; then
+            current_mode="${GREEN}优先使用 IPv4 (precedence ::ffff:0:0/96 100)${NC}"
+        elif [ -f "$gai_conf" ] && grep -qE "^[[:space:]]*precedence[[:space:]]+::/0[[:space:]]+100" "$gai_conf"; then
+            current_mode="${CYAN}优先使用 IPv6 (precedence ::/0 100)${NC}"
+        fi
+
+        echo -e " 当前调度策略: $current_mode"
+        echo ""
+        echo " 1. 🚀 设置优先使用 IPv4 (解决部分双栈网络中 IPv6 绕路或减速问题)"
+        echo " 2. 🌐 设置优先使用 IPv6 (适合 IPv6 优质线路或纯 IPv6 优先环境)"
+        echo " 3. 🔄 恢复系统默认策略 (移除自定义优先级规则)"
+        echo " 4. 🔍 查看 /etc/gai.conf 配置文件全文"
+        echo " 0. 返回上一级菜单"
+        echo -e "${CYAN}======================================================${NC}"
+        read -p "请输入操作选项 [0-4]: " prio_choice < /dev/tty
+
+        case "$prio_choice" in
+            1)
+                echo -e "${YELLOW}正在配置优先使用 IPv4...${NC}"
+                [ ! -f "$gai_conf" ] && touch "$gai_conf"
+                sed -i '/precedence ::ffff:0:0\/96 100/d' "$gai_conf"
+                sed -i '/precedence ::\/0 100/d' "$gai_conf"
+                echo "precedence ::ffff:0:0/96 100" >> "$gai_conf"
+                echo -e "${GREEN}✅ 成功: 已设置系统网络请求优先走 IPv4。${NC}"
+                sleep 1.2
+                ;;
+            2)
+                echo -e "${YELLOW}正在配置优先使用 IPv6...${NC}"
+                [ ! -f "$gai_conf" ] && touch "$gai_conf"
+                sed -i '/precedence ::ffff:0:0\/96 100/d' "$gai_conf"
+                sed -i '/precedence ::\/0 100/d' "$gai_conf"
+                echo "precedence ::/0 100" >> "$gai_conf"
+                echo -e "${GREEN}✅ 成功: 已设置系统网络请求优先走 IPv6。${NC}"
+                sleep 1.2
+                ;;
+            3)
+                echo -e "${YELLOW}正在恢复系统默认调度策略...${NC}"
+                if [ -f "$gai_conf" ]; then
+                    sed -i '/precedence ::ffff:0:0\/96 100/d' "$gai_conf"
+                    sed -i '/precedence ::\/0 100/d' "$gai_conf"
+                fi
+                echo -e "${GREEN}✅ 成功: 已清除自定义优先级，恢复系统默认。${NC}"
+                sleep 1.2
+                ;;
+            4)
+                clear
+                echo -e "${BLUE}=== /etc/gai.conf 详细内容 ===${NC}"
+                if [ -f "$gai_conf" ]; then
+                    cat "$gai_conf"
+                else
+                    echo "文件 /etc/gai.conf 尚不存在（系统使用编译期内置默认规则）。"
+                fi
+                echo ""
+                read -p "按回车键继续..." -r < /dev/tty
+                ;;
+            0)
+                break
+                ;;
+            *)
+                echo -e "${RED}输入无效，请重新选择。${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
 network_menu() {
     while true; do
         clear
         echo -e "${GREEN}==============================================${NC}"
         echo -e "${GREEN}           网络 IP 配置 (二级菜单)            ${NC}"
         echo -e "${GREEN}==============================================${NC}"
-        echo " 1. 查看当前网络信息"
-        echo " 2. 配置静态 IP (交互式)"
-        echo " 3. 切换为 DHCP 自动获取"
-        echo " 4. IP 流量伪装管理 (NAT 转发)"
+        echo " 1. 🌐 优化 DNS 地址配置"
+        echo " 2. 🔀 IPv4 / IPv6 出站路由优先级调度"
+        echo " 3. 查看当前网络信息"
+        echo " 4. 配置静态 IP (交互式)"
+        echo " 5. 切换为 DHCP 自动获取"
+        echo " 6. IP 流量伪装管理 (NAT 转发)"
         echo " 0. 返回主菜单"
         echo -e "${GREEN}==============================================${NC}"
-        read -p "请选择操作 [0-4]: " net_choice
+        read -p "请选择操作 [0-6]: " net_choice
 
         case $net_choice in
-            1) show_network_info ;;
-            2) configure_static_ip; read -p "按回车键继续..." ;;
-            3) configure_dhcp_ip; read -p "按回车键继续..." ;;
-            4) manage_nat_forwarding ;;
+            1) optimize_dns_menu ;;
+            2) manage_ip_priority_menu ;;
+            3) show_network_info ;;
+            4) configure_static_ip; read -p "按回车键继续..." ;;
+            5) configure_dhcp_ip; read -p "按回车键继续..." ;;
+            6) manage_nat_forwarding ;;
             0) break ;;
             *) echo -e "${RED}无效输入。${NC}"; sleep 1 ;;
         esac
     done
 }
 
-# ========== Nginx 配置查看模块 ==========
-
-# Nginx 配置表头打印
+# 双模运行守卫: 支持被主程序 source 引用或独立单兵执行
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    network_menu
+fi

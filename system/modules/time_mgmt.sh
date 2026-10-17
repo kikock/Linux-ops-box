@@ -1,16 +1,27 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 # =================================================================
 # 模块名称: time_mgmt.sh
-# 描述: 系统时间管理中心
-#       - 硬件时钟 (RTC/hwclock) 检测与读写
-#       - Docker NTP 服务器一键部署 (cturra/ntp)
-#       - NTP 服务器健康状态检测
-#       - 时间同步脚本生成与开机自启配置
-# 适配: Ubuntu / Debian / CentOS / RHEL / Rocky / AlmaLinux /
-#       Fedora / Alpine / 银河麒麟 / 统信UOS / openEuler / Anolis
-# 制作人: kikock
+# 描述: 系统时间管理中心，支持独立单兵运行与主程序微内核懒加载
 # =================================================================
+
+# 底座依赖自探测
+if ! declare -f _log_info &>/dev/null; then
+    _COMMON_PATHS=(
+        "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+        "/opt/ck_sysinit/system/modules/common.sh"
+        "/opt/ck_sysinit/modules/common.sh"
+    )
+    for _c in "${_COMMON_PATHS[@]}"; do
+        if [ -f "$_c" ]; then source "$_c"; break; fi
+    done
+fi
+
+GREEN="${GREEN:-\033[0;32m}"
+BLUE="${BLUE:-\033[0;34m}"
+RED="${RED:-\033[0;31m}"
+YELLOW="${YELLOW:-\033[1;33m}"
+CYAN="${CYAN:-\033[0;36m}"
+NC="${NC:-\033[0m}"
 
 # ----------------------------------------------------------------
 # 内部常量
@@ -2708,3 +2719,10 @@ time_management_menu() {
         esac
     done
 }
+
+# ---------------------------------------------------------
+# 双模独立执行入口
+# ---------------------------------------------------------
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    time_management_menu
+fi

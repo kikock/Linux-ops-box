@@ -1,10 +1,28 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 # =================================================================
 # 模块名称: firewall_mgmt.sh
 # 描述: 多发行版防火墙管理模块 (UFW / FirewallD)
-# 支持: 状态查看、开关控制、端口规则增删
+# 支持: 状态查看、开关控制、端口规则增删，支持单兵独立运行
 # =================================================================
+
+# 底座依赖自探测
+if ! declare -f _log_info &>/dev/null; then
+    _COMMON_PATHS=(
+        "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+        "/opt/ck_sysinit/system/modules/common.sh"
+        "/opt/ck_sysinit/modules/common.sh"
+    )
+    for _c in "${_COMMON_PATHS[@]}"; do
+        if [ -f "$_c" ]; then source "$_c"; break; fi
+    done
+fi
+
+GREEN="${GREEN:-\033[0;32m}"
+BLUE="${BLUE:-\033[0;34m}"
+RED="${RED:-\033[0;31m}"
+YELLOW="${YELLOW:-\033[1;33m}"
+CYAN="${CYAN:-\033[0;36m}"
+NC="${NC:-\033[0m}"
 
 # 探测防火墙驱动
 _get_fw_driver() {
@@ -205,3 +223,8 @@ firewall_menu() {
         esac
     done
 }
+
+# 双模运行守卫: 支持被主程序 source 引用或独立单兵执行
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    firewall_menu
+fi

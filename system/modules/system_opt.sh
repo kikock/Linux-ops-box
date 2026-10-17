@@ -1,3 +1,28 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Linux-ops-box 系统环境优化与软件包管理模块 (system_opt.sh)
+# 支持独立单兵运行与主程序微内核懒加载
+# ==============================================================================
+
+# 底座依赖自探测
+if ! declare -f _log_info &>/dev/null; then
+    _COMMON_PATHS=(
+        "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+        "/opt/ck_sysinit/system/modules/common.sh"
+        "/opt/ck_sysinit/modules/common.sh"
+    )
+    for _c in "${_COMMON_PATHS[@]}"; do
+        if [ -f "$_c" ]; then source "$_c"; break; fi
+    done
+fi
+
+GREEN="${GREEN:-\033[0;32m}"
+BLUE="${BLUE:-\033[0;34m}"
+RED="${RED:-\033[0;31m}"
+YELLOW="${YELLOW:-\033[1;33m}"
+CYAN="${CYAN:-\033[0;36m}"
+NC="${NC:-\033[0m}"
+
 update_system_packages() {
     echo -e "\n${BLUE}--- 开始更新系统软件包 ---${NC}"
     echo -e "${YELLOW}当前包管理器: ${PKG_MGR:-未检测到}${NC}"
@@ -604,7 +629,7 @@ system_optimization_menu() {
         echo -e "${GREEN}            系统环境优化 (二级菜单)            ${NC}"
         echo -e "${GREEN}==============================================${NC}"
         echo -e " 1. 镜像源管理 (阿里云/清华/中科大/官方/还原)"
-        echo -e " 2. 开启内核 BBR 网络加速"
+        echo -e " 2. 🚀 Linux系统内核参数优化自动根据网络环境调优"
         echo -e " 3. 配置 2GB zRAM 虚拟内存 (高压缩比)"
         echo -e " 4. 清除 zRAM/Swap 所有相关配置"
         echo -e " 5. 获取硬盘信息并交互式挂载"
@@ -619,16 +644,25 @@ system_optimization_menu() {
                 manage_mirror_sources
                 ;;
             2)
-                echo -e "${YELLOW}正在配置 BBR 加速...${NC}"
-                if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf; then
-                    echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
-                    echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-                    sysctl -p
-                    echo -e "${GREEN}成功: BBR 已开启。${NC}"
-                else
-                    echo -e "${BLUE}提示: BBR 似乎已经开启，无需重复操作。${NC}"
+                local tune_script="${BASE_DIR:-/opt/ck_sysinit}/system/modules/network_tune.sh"
+                if [ ! -f "$tune_script" ]; then
+                    tune_script="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/network_tune.sh"
                 fi
-                read -p "按回车键继续..."
+                if [ -f "$tune_script" ]; then
+                    source "$tune_script"
+                    network_tune_menu
+                else
+                    echo -e "${YELLOW}正在配置 BBR 加速...${NC}"
+                    if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf; then
+                        echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+                        echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+                        sysctl -p 2>/dev/null
+                        echo -e "${GREEN}成功: BBR 已开启。${NC}"
+                    else
+                        echo -e "${BLUE}提示: BBR 似乎已经开启，无需重复操作。${NC}"
+                    fi
+                    read -p "按回车键继续..."
+                fi
                 ;;
             3)
                 echo -e "${YELLOW}正在部署 zRAM 2GB 持久化方案...${NC}"
@@ -931,49 +965,65 @@ _collect_offline_packages() {
 }
 
 # ================================================================
-# 子功能 2: 直接在线安装常用专家工具集 (联网使用, 不处理离线)
+# 子功能 2: 常用基础软件管理看板 (Kejilion 风格: 状态矩阵/单独/批量/一键安装/卸载)
 # ================================================================
 _direct_install_online_tools() {
-    clear
-    echo -e "${CYAN}======================================================${NC}"
-    echo -e "${CYAN}       🚀 在线安装常用专家基础系统组件               ${NC}"
-    echo -e "${CYAN}======================================================${NC}"
-    echo -e "当前系统类型: ${GREEN}${DISTRO_NAME:-未知}${NC} (包管理器: ${CYAN}${PKG_MGR:-未知}${NC})"
-    echo ""
+    # 常用基础软件元数据定义 (编号|名称|检测命令|apt包名|yum/dnf包名|apk包名|说明)
+    local TOOLS_DEF=(
+        "1|curl|curl|curl|curl|curl|网络请求传输"
+        "2|wget|wget|wget|wget|wget|文件下载工具"
+        "3|openssh-server|sshd|openssh-server|openssh-server openssh-clients|openssh|SSH远程服务"
+        "4|vim|vim|vim|vim-enhanced|vim|全功能编辑器"
+        "5|nano|nano|nano|nano|nano|轻量文本编辑"
+        "6|git|git|git|git|git|版本控制工具"
+        "7|htop|htop|htop|htop|htop|交互进程监控"
+        "8|net-tools|netstat|net-tools|net-tools|net-tools|网络诊断netstat"
+        "9|lsof|lsof|lsof|lsof|lsof|端口文件查看"
+        "10|socat|socat|socat|socat|socat|端口管道转发"
+        "11|tar|tar|tar|tar|tar|标准归档解包"
+        "12|unzip/zip|unzip|unzip zip|unzip zip|unzip zip|ZIP解压压缩"
+        "13|cron|crontab|cron|cronie|cronie|定时任务调度"
+        "14|dnsutils|dig|dnsutils|bind-utils|bind-tools|DNS诊断dig"
+        "15|iputils-ping|ping|iputils-ping|iputils|iputils|网络Ping探测"
+        "16|sudo|sudo|sudo|sudo|sudo|管理员提权"
+        "17|bash-completion|bash-comp|bash-completion|bash-completion|bash-completion|命令自动补全"
+        "18|openssl|openssl|openssl|openssl|openssl|SSL证书工具"
+        "19|tmux|tmux|tmux|tmux|tmux|终端会话复用"
+        "20|rsync|rsync|rsync|rsync|rsync|增量文件同步"
+        "21|tree|tree|tree|tree|tree|目录树形展示"
+        "22|jq|jq|jq|jq|jq|命令行JSON处理"
+    )
 
-    # 网络检测
-    echo -ne "${BLUE}[1/2] 正在探测网络连通性...${NC} "
-    if ! _check_net_available; then
-        echo -e "${RED}✗ 网络不可达！${NC}"
-        echo -e "${YELLOW}提示: 此选项仅支持在线安装，请检查网络连接或 DNS 配置。${NC}"
-        echo ""
-        read -p "按回车键返回..." -r < /dev/tty
-        return 1
-    fi
-    echo -e "${GREEN}✓ 网络可达${NC}"
-    echo ""
+    # 检查命令是否存在函数
+    _is_tool_installed() {
+        local check_cmd="$1"
+        case "$check_cmd" in
+            sshd)
+                command -v sshd &>/dev/null || command -v ssh &>/dev/null
+                ;;
+            bash-comp)
+                [ -f /usr/share/bash-completion/bash_completion ] || [ -f /etc/bash_completion ] || command -v bash &>/dev/null
+                ;;
+            *)
+                command -v "$check_cmd" &>/dev/null
+                ;;
+        esac
+    }
 
-    # 在线安装常用工具
-    echo -e "${BLUE}[2/2] 通过包管理器在线安装工具...${NC}"
-    local PACKAGES=""
-    case "$PKG_MGR" in
-        apt)
-            PACKAGES="curl wget openssl lsof socat tar cron dnsutils nano vim git htop net-tools unzip zip iputils-ping sudo bash-completion"
-            ;;
-        dnf|yum)
-            PACKAGES="curl wget openssl lsof socat tar cronie bind-utils nano vim-enhanced git htop net-tools unzip zip iputils sudo bash-completion"
-            ;;
-        apk)
-            PACKAGES="curl wget openssl lsof socat tar bind-tools nano vim git htop net-tools unzip zip bash sudo"
-            ;;
-        *)
-            echo -e "${RED}错误: 未能识别当前包管理器，无法进行在线安装。${NC}"
-            read -p "按回车键返回..." -r < /dev/tty
-            return 1
-            ;;
-    esac
+    # 获取当前包管理器对应的安装包名称
+    _get_pkg_names() {
+        local apt_pkg="$1"
+        local yum_pkg="$2"
+        local apk_pkg="$3"
+        case "$PKG_MGR" in
+            apt)     echo "$apt_pkg" ;;
+            dnf|yum) echo "$yum_pkg" ;;
+            apk)     echo "$apk_pkg" ;;
+            *)       echo "$apt_pkg" ;;
+        esac
+    }
 
-    # 包管理器安装命令兜底保护
+    # 获取当前系统的包管理安装/卸载命令
     local install_cmd="${PKG_INSTALL:-}"
     if [ -z "$install_cmd" ]; then
         case "$PKG_MGR" in
@@ -981,40 +1031,214 @@ _direct_install_online_tools() {
             dnf)     install_cmd="dnf install -y" ;;
             yum)     install_cmd="yum install -y" ;;
             apk)     install_cmd="apk add" ;;
-            *)       install_cmd="" ;;
+            *)       install_cmd="apt install -y" ;;
         esac
     fi
 
-    echo -e "组件清单: ${GREEN}${PACKAGES}${NC}"
-    echo ""
-    if [ "$PKG_MGR" = "apt" ]; then
-        echo -e "${YELLOW}⏳ 正在更新软件源索引...${NC}"
-        apt update -y 2>/dev/null || true
-        echo ""
-    fi
+    local remove_cmd=""
+    case "$PKG_MGR" in
+        apt)     remove_cmd="apt purge -y" ;;
+        dnf)     remove_cmd="dnf remove -y" ;;
+        yum)     remove_cmd="yum remove -y" ;;
+        apk)     remove_cmd="apk del" ;;
+        *)       remove_cmd="" ;;
+    esac
 
-    $install_cmd $PACKAGES
-    local install_exit=$?
-    echo ""
-    if [ $install_exit -eq 0 ]; then
-        echo -e "${GREEN}✅ 所有常用基础软件在线安装/检查完毕。${NC}"
-    else
-        echo -e "${YELLOW}⚠️ 在线安装结束，部分软件包可能未成功安装（请检查软件源配置）。${NC}"
-    fi
+    # 主循环看板
+    while true; do
+        clear
+        echo -e "${CYAN}========================================================================${NC}"
+        echo -e "${CYAN}             🚀 常用基础运维软件管理看板 (Kejilion 矩阵风格)          ${NC}"
+        echo -e "${CYAN}========================================================================${NC}"
+        echo -e " 系统发行版: ${GREEN}${DISTRO_NAME:-未知}${NC}  |  包管理器: ${CYAN}${PKG_MGR:-未知}${NC}  |  网络探测: $(_check_net_available && echo -e "${GREEN}正常联网${NC}" || echo -e "${RED}网络受限${NC}")"
+        echo -e "${CYAN}------------------------------------------------------------------------${NC}"
 
-    # 状态自检（完整覆盖常用关键命令）
-    echo ""
-    echo -e "${CYAN}======================================================${NC}"
-    echo -e "${GREEN}常用命令状态自检:${NC}"
-    for cmd in curl openssl lsof socat tar wget crontab dig nano vim git htop netstat unzip zip; do
-        if command -v "$cmd" &>/dev/null; then
-            printf "  %-12s: ${GREEN}[已就绪]${NC}\n" "$cmd"
-        else
-            printf "  %-12s: ${RED}[未安装]${NC}\n" "$cmd"
-        fi
+        # 预先检测各工具状态
+        local total_tools=${#TOOLS_DEF[@]}
+        local installed_flags=()
+        local installed_count=0
+
+        for ((i=0; i<total_tools; i++)); do
+            IFS='|' read -r id name check_cmd apt_p yum_p apk_p desc <<< "${TOOLS_DEF[$i]}"
+            if _is_tool_installed "$check_cmd"; then
+                installed_flags[$i]=1
+                ((installed_count++))
+            else
+                installed_flags[$i]=0
+            fi
+        done
+
+        # 双列输出矩阵 (左侧 1..11, 右侧 12..22)
+        local half=$(( (total_tools + 1) / 2 ))
+        for ((i=0; i<half; i++)); do
+            # 左列项
+            IFS='|' read -r l_id l_name l_check l_apt l_yum l_apk l_desc <<< "${TOOLS_DEF[$i]}"
+            local l_status_text=""
+            if [ "${installed_flags[$i]}" -eq 1 ]; then
+                l_status_text="${GREEN}[✔已装]${NC}"
+            else
+                l_status_text="${RED}[✗未装]${NC}"
+            fi
+            local left_col
+            printf -v left_col " %2d. %-14s %b  %-12s" "$l_id" "$l_name" "$l_status_text" "$l_desc"
+
+            # 右列项
+            local right_idx=$((i + half))
+            local right_col=""
+            if [ $right_idx -lt $total_tools ]; then
+                IFS='|' read -r r_id r_name r_check r_apt r_yum r_apk r_desc <<< "${TOOLS_DEF[$right_idx]}"
+                local r_status_text=""
+                if [ "${installed_flags[$right_idx]}" -eq 1 ]; then
+                    r_status_text="${GREEN}[✔已装]${NC}"
+                else
+                    r_status_text="${RED}[✗未装]${NC}"
+                fi
+                printf -v right_col " %2d. %-14s %b  %-12s" "$r_id" "$r_name" "$r_status_text" "$r_desc"
+            fi
+
+            echo -e "${left_col}  │  ${right_col}"
+        done
+
+        echo -e "${CYAN}------------------------------------------------------------------------${NC}"
+        echo -e " 软件总计: ${total_tools} 个  |  已就绪: ${GREEN}${installed_count}${NC} 个  |  待安装: ${YELLOW}$((total_tools - installed_count))${NC} 个"
+        echo -e "${CYAN}========================================================================${NC}"
+        echo -e " ${GREEN}[操作指令]${NC}"
+        echo -e "  • ${CYAN}[编号]${NC}      单选或多选安装 (例: ${YELLOW}3${NC} 或 ${YELLOW}1 3 7 19 22${NC})"
+        echo -e "  • ${CYAN}a${NC} / ${CYAN}all${NC}   一键安装/补齐全量 22 项常用组件"
+        echo -e "  • ${CYAN}u <编号>${NC}  卸载指定软件 (例: ${YELLOW}u 7${NC} 卸载 htop)"
+        echo -e "  • ${CYAN}r${NC}          重新检测并刷新当前看板状态"
+        echo -e "  • ${CYAN}0${NC}          返回上级菜单"
+        echo -e "${CYAN}========================================================================${NC}"
+        read -p "请输入指令: " action_input < /dev/tty
+
+        case "$action_input" in
+            0)
+                break
+                ;;
+            r|R|"")
+                continue
+                ;;
+            a|all|ALL)
+                echo ""
+                echo -e "${BLUE}=== 正在执行全量常用基础软件安装 ===${NC}"
+                if ! _check_net_available; then
+                    echo -e "${RED}✗ 网络检测未通过，请检查网络设置或使用本地离线包。${NC}"
+                    read -p "按回车键继续..." -r < /dev/tty
+                    continue
+                fi
+                if ! _check_disk_space 2048 /var; then
+                    continue
+                fi
+                if [ "$PKG_MGR" = "apt" ]; then
+                    echo -e "${YELLOW}⏳ 正在更新软件源索引...${NC}"
+                    apt update -y 2>/dev/null || true
+                fi
+                # 拼接全量包名
+                local all_pkgs=""
+                for ((k=0; k<total_tools; k++)); do
+                    IFS='|' read -r _id _name _chk _apt _yum _apk _desc <<< "${TOOLS_DEF[$k]}"
+                    local pkg_for_sys
+                    pkg_for_sys=$(_get_pkg_names "$_apt" "$_yum" "$_apk")
+                    all_pkgs="$all_pkgs $pkg_for_sys"
+                done
+                echo -e "安装包列表: ${CYAN}${all_pkgs}${NC}"
+                $install_cmd $all_pkgs
+                echo -e "${GREEN}✅ 全量安装指令执行完毕。${NC}"
+                read -p "按回车键刷新看板..." -r < /dev/tty
+                ;;
+            u\ *|U\ *)
+                # 卸载逻辑
+                local target_id="${action_input#* }"
+                target_id=$(echo "$target_id" | xargs)
+                if ! [[ "$target_id" =~ ^[0-9]+$ ]] || [ "$target_id" -lt 1 ] || [ "$target_id" -gt "$total_tools" ]; then
+                    echo -e "${RED}错误: 无效的软件编号 '$target_id'${NC}"
+                    sleep 1.5
+                    continue
+                fi
+                local target_idx=$((target_id - 1))
+                IFS='|' read -r u_id u_name u_chk u_apt u_yum u_apk u_desc <<< "${TOOLS_DEF[$target_idx]}"
+                local u_pkgs
+                u_pkgs=$(_get_pkg_names "$u_apt" "$u_yum" "$u_apk")
+
+                # 高危防护判断 (ssh, sudo, bash)
+                if [ "$u_name" = "sudo" ] || [ "$u_name" = "openssh-server" ] || [ "$u_name" = "tar" ]; then
+                    echo -e "${RED}⚠️ 高危警告: 卸载 [${u_name}] 可能导致远程无法登录或关键权限丢失！${NC}"
+                    read -p "确定仍要继续卸载吗？(输入 yes 确认): " confirm_u < /dev/tty
+                    if [ "$confirm_u" != "yes" ]; then
+                        echo -e "${YELLOW}已取消卸载。${NC}"
+                        sleep 1.5
+                        continue
+                    fi
+                else
+                    read -p "确认卸载 [${u_name}] (${u_pkgs}) 吗？[y/N]: " confirm_u < /dev/tty
+                    if [[ ! "$confirm_u" =~ ^[Yy]$ ]]; then
+                        echo -e "${YELLOW}已取消卸载。${NC}"
+                        sleep 1
+                        continue
+                    fi
+                fi
+
+                echo -e "${YELLOW}正在卸载 ${u_name} (${u_pkgs})...${NC}"
+                if [ -n "$remove_cmd" ]; then
+                    $remove_cmd $u_pkgs
+                    echo -e "${GREEN}卸载操作执行完毕。${NC}"
+                else
+                    echo -e "${RED}错误: 当前包管理器不支持自动卸载。${NC}"
+                fi
+                read -p "按回车键刷新看板..." -r < /dev/tty
+                ;;
+            *)
+                # 单选或多选安装 (解析输入的多个数字)
+                local selected_ids=($action_input)
+                local valid_install_pkgs=""
+                local valid_count=0
+
+                for sid in "${selected_ids[@]}"; do
+                    if [[ "$sid" =~ ^[0-9]+$ ]] && [ "$sid" -ge 1 ] && [ "$sid" -le "$total_tools" ]; then
+                        local s_idx=$((sid - 1))
+                        IFS='|' read -r s_id s_name s_chk s_apt s_yum s_apk s_desc <<< "${TOOLS_DEF[$s_idx]}"
+                        local s_pkg
+                        s_pkg=$(_get_pkg_names "$s_apt" "$s_yum" "$s_apk")
+                        valid_install_pkgs="$valid_install_pkgs $s_pkg"
+                        ((valid_count++))
+                    fi
+                done
+
+                if [ "$valid_count" -eq 0 ]; then
+                    echo -e "${RED}输入无法识别，请输入正确的软件编号或命令（输入 0 返回）。${NC}"
+                    sleep 1.5
+                    continue
+                fi
+
+                echo ""
+                echo -e "${BLUE}=== 正在安装选中的软件组件 (${valid_count}项) ===${NC}"
+                if ! _check_net_available; then
+                    echo -e "${RED}✗ 网络检测未通过，无法进行在线安装！${NC}"
+                    read -p "按回车键继续..." -r < /dev/tty
+                    continue
+                fi
+                if ! _check_disk_space 512 /var; then
+                    continue
+                fi
+
+                if [ "$PKG_MGR" = "apt" ]; then
+                    echo -e "${YELLOW}⏳ 正在更新软件源索引...${NC}"
+                    apt update -y 2>/dev/null || true
+                fi
+
+                echo -e "正在执行安装: ${CYAN}${valid_install_pkgs}${NC}"
+                $install_cmd $valid_install_pkgs
+                local ins_code=$?
+                echo ""
+                if [ $ins_code -eq 0 ]; then
+                    echo -e "${GREEN}✅ 软件安装成功！${NC}"
+                else
+                    echo -e "${YELLOW}⚠️ 安装退出代码为 ${ins_code}，请检查包管理器输出或源配置。${NC}"
+                fi
+                read -p "按回车键刷新看板..." -r < /dev/tty
+                ;;
+        esac
     done
-    echo -e "${CYAN}======================================================${NC}"
-    read -p "按回车键继续..." -r < /dev/tty
 }
 
 # ================================================================
@@ -1090,7 +1314,7 @@ _install_offline_packages_local() {
         echo ""
         echo -e "${CYAN}======================================================${NC}"
         echo -e "${GREEN}[2/2] 常用命令状态自检:${NC}"
-        for cmd in curl openssl lsof socat tar wget crontab dig nano vim git htop netstat unzip zip; do
+        for cmd in curl openssl lsof socat tar wget crontab dig nano vim git htop netstat unzip zip ssh; do
             if command -v "$cmd" &>/dev/null; then
                 printf "  %-12s: ${GREEN}[已就绪]${NC}\n" "$cmd"
             else
@@ -1710,7 +1934,7 @@ install_common_tools() {
         echo -e "当前系统类型: ${GREEN}${DISTRO_NAME:-未知}${NC} (包管理器: ${CYAN}${PKG_MGR:-未知}${NC})"
         echo ""
         echo -e " 1. 📦 采集离线安装包到本地 (需联网, 供无网服务器使用)"
-        echo -e " 2. 🚀 直接安装常用工具集   (直接在线联网安装, 不处理离线)"
+        echo -e " 2. 🚀 常用基础软件管理看板 (Kejilion风格: 矩阵看板/单选多选/一键全量/卸载)"
         echo -e " 3. 💾 本地离线安装工具集   (无网服务器使用本地离线包部署)"
         echo -e " 4. 🧰 Mise 多运行时环境管理 (安装/配置/版本查看/管理 Java Node Go Python)"
         echo -e " 0. 返回主菜单"
@@ -1740,3 +1964,8 @@ install_common_tools() {
         esac
     done
 }
+
+# 双模运行守卫: 支持被主程序 source 引用或独立单兵执行
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    system_optimization_menu
+fi

@@ -253,7 +253,7 @@ if [ -f "$HOME/.acme.sh/acme.sh" ]; then
     green "✓ 安装 acme.sh 证书申请程序成功！"
     bash "$HOME/.acme.sh/acme.sh" --set-default-ca --server letsencrypt >/dev/null 2>&1 || true
 else
-    red "❌ 安装 acme.sh 证书申请程序失败，请检查网络或离线包。" && exit 1
+    red "❌ 安装 acme.sh 证书申请程序失败，请检查网络或离线包。" && return 1
 fi
 }
 

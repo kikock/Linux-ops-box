@@ -1,17 +1,27 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 # =================================================================
 # 模块名称: disk_mgmt.sh
-# 描述: 硬盘检测与清理中心
-#       - 硬盘整体使用情况 (多分区 / 使用率告警着色)
-#       - 大文件扫描 (Top N / 指定路径)
-#       - 大目录扫描 (du 排序分析)
-#       - 按文件类型统计占用 (日志 / 压缩 / 视频 / 其他)
-#       - inode 使用情况检测
-#       - 一键清理辅助 (apt|yum 缓存 / 系统日志 / tmp / Docker)
-# 适配: Ubuntu / Debian / CentOS / RHEL / Fedora / Alpine
-# 制作人: kikock
+# 描述: 硬盘检测与清理中心，支持独立单兵运行与主程序微内核懒加载
 # =================================================================
+
+# 底座依赖自探测
+if ! declare -f _log_info &>/dev/null; then
+    _COMMON_PATHS=(
+        "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+        "/opt/ck_sysinit/system/modules/common.sh"
+        "/opt/ck_sysinit/modules/common.sh"
+    )
+    for _c in "${_COMMON_PATHS[@]}"; do
+        if [ -f "$_c" ]; then source "$_c"; break; fi
+    done
+fi
+
+GREEN="${GREEN:-\033[0;32m}"
+BLUE="${BLUE:-\033[0;34m}"
+RED="${RED:-\033[0;31m}"
+YELLOW="${YELLOW:-\033[1;33m}"
+CYAN="${CYAN:-\033[0;36m}"
+NC="${NC:-\033[0m}"
 
 # ----------------------------------------------------------------
 # 内部辅助: 格式化字节为人类可读
@@ -579,3 +589,8 @@ disk_management_center() {
         esac
     done
 }
+
+# 双模运行守卫: 支持被主程序 source 引用或独立单兵执行
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    disk_management_center
+fi

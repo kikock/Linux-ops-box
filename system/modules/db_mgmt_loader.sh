@@ -6,6 +6,13 @@
 # 职责: 映射 db_mgmt.sh 逻辑到 ck_sysinit TUI 菜单
 # =================================================================
 
+# 自动探测并加载通用底座函数 (双模兼容)
+_CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$_CURRENT_DIR/common.sh" ]; then
+    source "$_CURRENT_DIR/common.sh"
+fi
+BASE_DIR="${BASE_DIR:-$_CURRENT_DIR}"
+
 # 模块级路径变量
 DB_MOD_DIR="$BASE_DIR/db_manager"
 DB_MGMT_SCRIPT="$DB_MOD_DIR/db_mgmt.sh"
@@ -34,3 +41,10 @@ db_management_center() {
     # 因为 db_mgmt.sh 的 main_menu 有 while true 循环，这里直接接管
     main_menu
 }
+
+# ---------------------------------------------------------
+# 双模独立执行入口
+# ---------------------------------------------------------
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    db_management_center
+fi

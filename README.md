@@ -4,11 +4,12 @@
 
 ## ✨ 核心特性
 
-- **多发行版兼容**: 深度适配 Ubuntu/Debian/CentOS/Rocky/Armbian/Alpine，自动识别底层包管理器（apt/dnf/yum/apk）。
-- **完全解耦的架构**: 主程序仅 200 行负责 TUI 菜单分发，各类功能下沉至 `modules/` 子模块，互不干扰。
-- **透明审计**: 所有状态输出通过专门的日志基座 `common.sh`，实现控制台高亮输出与 `/var/log/ck_system_init.log` 原文存档双写。
-- **独立专家级工具**: 为高频组件（如 Docker/VPN/代理）提供完全独立的、具备实时版本采集能力的安装与管理脚本。
-- **无损热升级与环境自愈**: 系统在线升级自动开启本地配置与历史备份文件热迁移，内置 crontab 定时任务与 JSON 管理器双向同步及失效清理机制，确保数据资产安全。
+- **多发行版全覆盖**: 深度适配 Ubuntu/Debian/CentOS/Rocky/Armbian/Alpine/Arch Linux/openSUSE 及国产信创（银河麒麟/统信UOS/openEuler/龙蜥），自动识别并适配底层包管理器（apt/dnf/yum/apk/pacman/zypper）。
+- **微内核按需懒加载 (Lazy-Loading)**: 主程序彻底移除开机静态全量 source，改造为动态按需加载模块，启动速度提升数倍，零内存污染与全局变量踩踏。
+- **全模块双模单兵运行**: 全量子模块均具备自探测底座与独立执行守卫，既可由 `ck_sysinit` 统一调度，也可在终端直接以单脚本独立执行（如 `bash system/modules/network_tune.sh`）。
+- **系统与网络自适应调优**: 自动探测网卡物理链路带宽与实时网络 RTT 延迟/丢包率，分档动态计算 TCP 读写缓冲与队列上限，结合 BBR 加速与一键回滚。
+- **企业级安全防护机制**: 内置跨终端并发文件锁（Linux `flock` 120s 防死锁）、系统安装前磁盘容量安全预检（`_check_disk_space` 防撑爆根分区）与子模块安全返回规范。
+- **透明审计与运维告警**: 日志基座 `common.sh` 实现控制台高亮与 `/var/log/ck_system_init.log` 双写存盘；集成 Telegram Bot 实时超限推送与防风暴抑制。
 
 ---
 
@@ -29,19 +30,20 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 | 序号 | 功能模块 | 核心子功能 | 对应模块文件 |
 |:---:|:---|:---|:---|
 | 1 | **系统软件包更新** | 依赖清理 / 内核升级 | `system_opt.sh` |
-| 2 | **系统环境深度优化** | 换源 / BBR / Swap / 挂载 / 代理 | `system_opt.sh` |
-| 3 | **常用专家工具集** | 采集离线包 / 在线安装 / 本地离线部署 / Mise 多运行时管理 (Java/Node/Go/Python) | `system_opt.sh` |
+| 2 | **系统环境深度优化** | 换源 / Swap / 挂载 / **Linux系统网络内核自适应深度调优 (BBR/大缓冲区/防OOM)** | `system_opt.sh` / `network_tune.sh` |
+| 3 | **常用专家工具集** | **常用基础软件管理看板 (Kejilion风格双列看板/单选多选全量/安全卸载)** / 离线包采集 / 本地离线部署 / Mise 多运行时管理 | `system_opt.sh` |
 | 4 | **SSH 远程安全加固** | 证书登录 / 端口自定义 / 防爆破 / 服务状态监控 / 一键重启与安装 | `ssh_sec.sh` |
 | 5 | **防火墙安全管理** | UFW / FirewallD TUI 管理 | `firewall_mgmt.sh` |
-| 6 | **网络 IP 与网卡诊断** | 静态 IP / 路由 / 网卡信息 | `network.sh` |
-| 7 | **系统资源与服务监控** | 进程 / Nginx 状态 / 磁盘 IO | `nginx_view.sh` |
+| 6 | **网络 IP 与网卡诊断** | **优化 DNS 地址配置 (国内外/手动编辑)** / **IPv4 与 IPv6 出站解析优先级调度 (/etc/gai.conf)** / 静态 IP / 路由 / NAT 转发 | `network.sh` |
+| 7 | **系统资源与服务监控** | 进程 / Nginx 站点配置解析 / 磁盘 IO 实时监控 / 硬件总览 | `nginx_view.sh` |
 | 8 | **数据库管理中心** | 备份/恢复/连接管理/定时备份/数据表归档 (详见 §6) | `db_mgmt_loader.sh` |
-| 9 | **Docker 管理中心** | 安装/服务管理/Compose 编排 | `docker_mgmt.sh` |
+| 9 | **Docker 管理中心** | 安装/服务管理/Compose 编排 / **国内镜像加速源智能并发测速与自愈 / HTTP私有库安全隔离** | `docker_mgmt.sh` |
 | 10 | **VNC 服务管理中心** | 一键安装 VNC / 桌面自启动 / 多端口多账户 | `vnc_mgmt.sh` |
 | 11 | **服务器代理配置** | Hosts 代理加速 / 环境变量代理 / Docker 镜像与信任 | `setup_proxy_registry.sh` |
 | 12 | **SSL/TLS 证书管理中心** | ACME 联网商业证书申请 / 离线自签证书体系 / 私有根 CA | `ssl_cert.sh` / `acme.sh` |
 | 13 | **硬盘检测与清理中心** | 磁盘使用率 / 大文件 / 大目录 / 智能清理辅助 | `disk_mgmt.sh` |
 | 14 | **系统时间管理中心** | 系统时区配置 / RTC硬件时钟 / NTP服务器搭建 / 多源对齐 / 开机同步 (详见 §7) | `time_mgmt.sh` |
+| 15 | **Telegram 运维告警中心** | Bot 消息推送 / CPU/内存/磁盘超限告警 (>85%预警, >95%严重) / Crontab 守护 / 防刷屏风暴抑制 | `notify.sh` |
 | 88 | **在线更新工具箱** | 智能探测最优加速通道 (支持5大源测速) 并云端热覆写 | 内置 |
 | 99 | **卸载工具箱** | 清理软链接与守护目录 | 内置 |
 | 0 | **退出工具箱** | 退出管理程序 | 内置 |
@@ -50,7 +52,9 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 
 | 模块文件 | 职能描述 |
 |:---|:---|
-| `common.sh` | 全局底座：颜色规范、双写审计日志 (`/var/log/ck_system_init.log`)、跨平台发行版自检 `_init_distro()` |
+| `common.sh` | 全局底座：颜色规范、双写审计日志 (`/var/log/ck_system_init.log`)、跨平台包管理器统一支持 (`apt/dnf/yum/apk/pacman/zypper`)、**并发互斥安全锁 (`flock` 120s 防死锁)**、**系统级安装前磁盘预检 (`_check_disk_space`)** |
+| `network_tune.sh` | **Linux 系统网络内核自适应深度调优中心**：链路物理带宽自动识别、并发全球 ICMP 测算 RTT 延迟与丢包率、4 档自适应 TCP 读写缓冲与队列优化、BBR 拥塞算法一键激活与无损配置回滚 |
+| `notify.sh` | **Telegram 运维告警中心**：轻量级 Bot 绑定、Markdown 格式告警卡片、Crontab 定时巡检（CPU/内存/磁盘）、1 小时告警风暴抑制锁 |
 | `time_mgmt.sh` | 系统时间管理中心：硬件时钟 (RTC/hwclock) 读写与校准、Docker NTP 服务器 (cturra/ntp) 一键部署、纯 Bash UDP 123 零依赖健康探测、Chrony/ntpdate 客户端配置与开机自启、时钟漂移综合诊断 |
 | `ssl_cert.sh` | SSL/TLS 证书管理中心：融合 ACME 联网申请与离线自签、专家级 SAN (IP/多域名/通配符)、私有根 CA 签发、PFX/PEM 格式互转、密钥对配对诊断 |
 | `acme.sh` | ACME 证书自动化引擎：支持 Let's Encrypt / ZeroSSL、IP 证书、80 端口单域名与 DNS API 泛域名申请及自动续期 |
@@ -60,6 +64,7 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 | `sing-box-plus.sh` | Sing-Box 代理管理集成模块（安装/配置/订阅管理） |
 | `db_mgmt_loader.sh` | 数据库模块适配加载器，将 `db_manager/db_mgmt.sh` 接入 TUI 菜单 |
 | `vnc_mgmt.sh` | VNC 服务管理中心模块：支持运行状态监控、一键部署实例、服务启停与彻底注销 |
+| `nginx_view.sh` | 系统资源与服务监控：Nginx 站点配置自动解析、Top 15 进程监控、内存与磁盘 I/O 监控、硬件总览 |
 
 ---
 
@@ -303,32 +308,50 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 
 本工具箱采用高度模块化的 Shell 函数架构，极易进行二次开发。
 
-### 1. 新建模块范式
+### 1. 新建模块与双模范式 (Dual-Mode Invocation)
 
-在 `system/modules/` 下建立 `.sh` 文件，并遵循以下规范：
+在 `system/modules/` 下建立 `.sh` 文件，并遵循以下解耦与双模规范：
 
-- **全局环境**: 直接使用 `common.sh` 中导出的全局变量 (如 `$GREEN`, `$CYAN`, `$OS_NAME`, `$PKG_MGR`)。
-- **函数包裹**: 所有逻辑必须封装在函数内，避免在 `source` 时产生副作用。
-- **日志双写**: 强制使用 `_log_info` 等标准日志接口，严禁直接使用 `echo` 以确保审计。
-- **范态参考**: 建议参考 `modules/nginx_view.sh` 的 TUI 实现逻辑。
+- **通用底座自探测**: 模块头部统一添加通用底座加载检测，确保单兵执行时具备完整日志与包管理底座：
+  ```bash
+  _CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -f "$_CURRENT_DIR/common.sh" ]; then
+      source "$_CURRENT_DIR/common.sh"
+  fi
+  ```
+- **双模运行守卫**: 模块尾部必须通过 `BASH_SOURCE` 守卫独立执行入口，支持单兵执行与主菜单动态挂载：
+  ```bash
+  if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+      your_module_main_menu
+  fi
+  ```
+- **安全返回规范**: 模块内子流程中断必须使用 `return`，严禁直接使用 `exit`，防止误杀管理员当前主 Shell。
+- **日志双写与并发保护**: 统一调用 `_log_info` / `_log_err`；涉及安装包操作调用 `_run_with_ops_lock` 并通过 `_check_disk_space` 进行磁盘空间预检。
 
-### 2. 菜单挂载流程
+### 2. 微内核动态按需挂载流程 (Lazy-Loading)
 
-1. 编辑 `system/system_init.sh`。
-2. 在文件头部执行 `source "$BASE_DIR/modules/your_module.sh"`。
-3. 在 `while true` 循环中增加菜单项编号。
-4. 在 `case` 语句块中分发执行对应的模块函数。
+1. 在 `system/system_init.sh` 的主菜单 `while true` 循环中增加菜单项编号。
+2. 在 `case "$main_choice"` 分支中，使用 `_load_module` 动态懒加载对应模块并调用入口函数：
+   ```bash
+   16)
+       _load_module "your_module.sh"
+       your_module_main_menu
+       ;;
+   ```
+3. 无需在主程序头部进行任何静态 `source`，确保微内核极致轻量与隔离。
 
 ---
 
 ## 🚀 12. 后续更新计划 (Roadmap)
 
-我们致力于将 `Linux-ops-box` 打造为最懂运维、最轻量的 TUI 工具箱。
+我们致力于将 `Linux-ops-box` 打造为最懂运维、最轻量的企业级 TUI 工具箱。
 
 ### 📅 近期目标 (v2.x)
 
-- [ ] **运维告警集成**: 支持 Telegram / 钉钉 / 飞书 机器人推送系统关键指标异常告警。
-- [x] **数据库管理中心**: ✅ MySQL / PostgreSQL TUI 管理（v2.1 已落地，含 Docker 容器模式、定时备份、多连接管理、数据表自动化归档）。
+- [x] **运维告警集成**: ✅ 已落地 Telegram 机器人告警中心（支持 CPU/内存/磁盘超限告警、Crontab 定时守护与 1 小时风暴抑制）。
+- [x] **自适应网络内核优化**: ✅ 已落地（自适应带宽与延迟测算、4 档计算优化、BBR/fq 一键激活与无损配置回滚）。
+- [x] **架构微内核全量解耦**: ✅ 已落地（主程序动态懒加载、全模块双模单兵运行、安全退出规范化）。
+- [x] **数据库管理中心**: ✅ MySQL / PostgreSQL TUI 管理（含 Docker 容器模式、定时备份、多连接管理、数据表自动化归档）。
 - [x] **SSL 证书管家**: ✅ 已落地（融合 `acme.sh` 商业证书与 `openssl` 离线自签、IP 证书、DNS API 泛域名申请、私有根 CA 签发）。
 - [x] **系统时间管理中心**: ✅ 已落地（支持 RTC 硬件时钟读写、Docker NTP 服务端搭建、Chrony/ntpdate 客户端自启与纯 Bash UDP 123 零依赖健康探测）。
 - [ ] **Redis 管理扩展**: 基于数据库管理中心框架，扩展 Redis 键值浏览与 RDB/AOF 备份支持。

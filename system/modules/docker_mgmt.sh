@@ -1,13 +1,28 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 # =================================================================
 # 模块名称: docker_mgmt.sh
 # 描述: Docker & Compose 管理中心 (Linux-ops-box 集成模块 v2.3)
-# 职责: 作为 ck_sysinit TUI 菜单的 Docker 管理子模块
-# 架构: install_docker.sh 已合并入 system_init.sh 体系，
-#       本模块内嵌完整功能，不再依赖外部脚本
-# 依赖: common.sh (全局颜色变量 GREEN/RED/YELLOW/CYAN/BLUE/NC)
+# 职责: 支持独立单兵运行与主程序微内核懒加载
 # =================================================================
+
+# 底座依赖自探测
+if ! declare -f _log_info &>/dev/null; then
+    _COMMON_PATHS=(
+        "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+        "/opt/ck_sysinit/system/modules/common.sh"
+        "/opt/ck_sysinit/modules/common.sh"
+    )
+    for _c in "${_COMMON_PATHS[@]}"; do
+        if [ -f "$_c" ]; then source "$_c"; break; fi
+    done
+fi
+
+GREEN="${GREEN:-\033[0;32m}"
+BLUE="${BLUE:-\033[0;34m}"
+RED="${RED:-\033[0;31m}"
+YELLOW="${YELLOW:-\033[1;33m}"
+CYAN="${CYAN:-\033[0;36m}"
+NC="${NC:-\033[0m}"
 
 # ── 架构探测 ─────────────────────────────────────────────────────
 _docker_detect_arch() {
@@ -180,6 +195,227 @@ docker_management_center() {
     _docker_main_menu
 }
 
+# ── 辅助: 写入或更新 daemon.json 中的 mirrors ─────────────────
+_docker_apply_daemon_mirrors() {
+    local -a mirrors=("$@")
+    mkdir -p /etc/docker
+    local df="/etc/docker/daemon.json"
+    [ -f "$df" ] && cp -f "$df" "${df}.bak_$(date +%Y%m%d_%H%M%S)"
+
+    # 读取旧的 insecure-registries (若存在)
+    local old_insecure=()
+    if [ -f "$df" ]; then
+        while read -r in_line; do
+            local clean_addr
+            clean_addr=$(echo "$in_line" | tr -d '", \t')
+            [ -n "$clean_addr" ] && old_insecure+=("\"$clean_addr\"")
+        done < <(sed -n '/"insecure-registries"/,/]/p' "$df" 2>/dev/null | grep -E '"[^"]+"' | grep -v 'insecure-registries')
+    fi
+
+    {
+        echo "{"
+        echo "  \"registry-mirrors\": ["
+        local m_cnt=${#mirrors[@]}
+        for ((i=0; i<m_cnt; i++)); do
+            local comma=","
+            [ $((i+1)) -eq $m_cnt ] && comma=""
+            echo "    \"${mirrors[i]}\"${comma}"
+        done
+        echo "  ],"
+        echo "  \"insecure-registries\": ["
+        local ins_cnt=${#old_insecure[@]}
+        for ((i=0; i<ins_cnt; i++)); do
+            local comma=","
+            [ $((i+1)) -eq $ins_cnt ] && comma=""
+            echo "    ${old_insecure[i]}${comma}"
+        done
+        echo "  ],"
+        echo "  \"exec-opts\": [\"native.cgroupdriver=systemd\"],"
+        echo "  \"log-driver\": \"json-file\","
+        echo "  \"log-opts\": { \"max-size\": \"100m\" },"
+        echo "  \"storage-driver\": \"overlay2\""
+        echo "}"
+    } > "$df"
+
+    echo -e "${GREEN}✓ 配置已成功写入 /etc/docker/daemon.json${NC}"
+    echo ""
+    read -rp "是否立即重启 Docker 服务使新镜像源生效？[Y/n]: " yn_rst < /dev/tty
+    if [[ ! "$yn_rst" =~ ^[Nn]$ ]]; then
+        echo -e "${YELLOW}>> 正在重载 systemd 并重启 Docker...${NC}"
+        systemctl daemon-reload 2>/dev/null
+        systemctl restart docker 2>/dev/null
+        sleep 2
+        if systemctl is-active docker &>/dev/null; then
+            echo -e "${GREEN}✅ Docker 服务已成功重启并激活新配置！${NC}"
+        else
+            echo -e "${RED}⚠️ Docker 服务重启异常，请检查配置或日志: journalctl -u docker -e --no-pager${NC}"
+        fi
+    fi
+}
+
+# ── 智能并发测速并自愈 ──────────────────────────────────────────
+_docker_auto_heal_mirrors() {
+    clear
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "${CYAN}      ⚡ Docker 国内镜像源智能并发测速与自愈探测        ${NC}"
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "正在探测国内各大主流镜像节点网络可达性与响应延迟..."
+    echo ""
+
+    local candidate_mirrors=(
+        "https://docker.m.daocloud.io"
+        "https://dockerproxy.cn"
+        "https://dockerpull.com"
+        "https://docker.1panel.live"
+        "https://hub-mirror.c.163.com"
+        "https://mirror.baidubce.com"
+        "https://docker.mirrors.sjtug.sjtu.edu.cn"
+    )
+
+    local tmp_res="/tmp/docker_ping_$$.txt"
+    rm -f "$tmp_res"
+
+    for url in "${candidate_mirrors[@]}"; do
+        printf "  %-42s ... " "$url"
+        local chk
+        chk=$(curl -s -k -m 3 -o /dev/null -w "%{http_code} %{time_total}" "${url}/v2/" 2>/dev/null)
+        local code
+        code=$(echo "$chk" | awk '{print $1}')
+        local rtt
+        rtt=$(echo "$chk" | awk '{print int($2*1000)}')
+        if [[ "$code" =~ ^(200|401|301|302)$ ]] && [ "$rtt" -gt 0 ]; then
+            echo -e "${GREEN}存活 (${rtt}ms, HTTP $code)${NC}"
+            echo "$rtt $url" >> "$tmp_res"
+        else
+            echo -e "${RED}不可用/超时 (HTTP ${code:-Err})${NC}"
+        fi
+    done
+
+    echo ""
+    if [ ! -s "$tmp_res" ]; then
+        echo -e "${RED}✗ 警告: 所有预设镜像源均响应超时或不可用，当前网络可能无法直接连通外部节点。${NC}"
+        rm -f "$tmp_res"
+        read -rp "按回车键返回..." < /dev/tty
+        return 1
+    fi
+
+    local selected_urls=()
+    echo -e "${GREEN}>> 测速完成，最优候选源排名:${NC}"
+    local rank=1
+    while read -r rtt url; do
+        echo -e "  $rank. ${CYAN}$url${NC} (延迟: ${rtt}ms)"
+        selected_urls+=("$url")
+        ((rank++))
+        [ $rank -gt 3 ] && break
+    done < <(sort -n "$tmp_res")
+    rm -f "$tmp_res"
+
+    echo ""
+    read -rp "是否将上述最优节点自动注入 daemon.json 进行自愈？[Y/n]: " do_inject < /dev/tty
+    if [[ ! "$do_inject" =~ ^[Nn]$ ]]; then
+        _docker_apply_daemon_mirrors "${selected_urls[@]}"
+    fi
+    read -rp "按回车键继续..." < /dev/tty
+}
+
+# ── 手动选择预设国内加速源 ──────────────────────────────────────
+_docker_manual_select_mirrors() {
+    local picked=()
+    _docker_select_cn_mirrors picked
+    if [ ${#picked[@]} -gt 0 ]; then
+        local clean_picked=()
+        for p in "${picked[@]}"; do
+            clean_picked+=("$(echo "$p" | tr -d '"')")
+        done
+        _docker_apply_daemon_mirrors "${clean_picked[@]}"
+    fi
+    read -rp "按回车键继续..." < /dev/tty
+}
+
+# ── 自定义添加反代加速源 ────────────────────────────────────────
+_docker_add_custom_mirror() {
+    clear
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "${CYAN}        ✍️ 添加自定义 Docker 镜像加速源 (HTTPS)       ${NC}"
+    echo -e "${CYAN}======================================================${NC}"
+    echo -e "适用于您自建的 Cloudflare Worker 代理或私有加速域名。"
+    echo ""
+    read -rp "请输入加速源完整域名或 URL (例如: mydocker.example.com): " custom_mirror < /dev/tty
+    [ -z "$custom_mirror" ] && return 0
+    custom_mirror="${custom_mirror#http://}"
+    custom_mirror="https://${custom_mirror#https://}"
+    custom_mirror="${custom_mirror%/}"
+
+    echo -e "\n正在探活测试: ${custom_mirror}/v2/ ..."
+    local chk
+    chk=$(curl -s -k -m 4 -o /dev/null -w "%{http_code}" "${custom_mirror}/v2/" 2>/dev/null)
+    if [[ "$chk" =~ ^(200|401|301|302)$ ]]; then
+        echo -e "${GREEN}✓ 节点探活正常 (HTTP $chk)${NC}"
+    else
+        echo -e "${YELLOW}⚠️ 节点返回状态码异常 (HTTP $chk)，但仍可强制添加。${NC}"
+    fi
+
+    read -rp "确认将 ${custom_mirror} 写入加速源列表？[Y/n]: " add_yn < /dev/tty
+    if [[ ! "$add_yn" =~ ^[Nn]$ ]]; then
+        _docker_apply_daemon_mirrors "$custom_mirror"
+    fi
+    read -rp "按回车键继续..." < /dev/tty
+}
+
+# ── 恢复官方默认源 ──────────────────────────────────────────────
+_docker_restore_default_mirrors() {
+    clear
+    echo -e "${YELLOW}======================================================${NC}"
+    echo -e "${YELLOW}        🔄 清理 Docker 加速源，恢复官方默认直连       ${NC}"
+    echo -e "${YELLOW}======================================================${NC}"
+    read -rp "确认清除 registry-mirrors 并恢复官方海外直连？[y/N]: " rst_yn < /dev/tty
+    if [[ "$rst_yn" =~ ^[Yy]$ ]]; then
+        _docker_apply_daemon_mirrors
+        echo -e "${GREEN}✅ 已清除所有加速镜像，系统已恢复为官方镜像直连模式。${NC}"
+    fi
+    read -rp "按回车键继续..." < /dev/tty
+}
+
+# ── 5. Docker 镜像源智能分流与国内自愈加速中心菜单 ───────────────
+_docker_mirror_healing_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}======================================================${NC}"
+        echo -e "${CYAN}      🚀 Docker 镜像源智能分流与国内自愈加速中心       ${NC}"
+        echo -e "${CYAN}======================================================${NC}"
+
+        echo -e "${YELLOW}当前配置的 registry-mirrors:${NC}"
+        if [ -f /etc/docker/daemon.json ]; then
+            local cur_mirrors
+            cur_mirrors=$(grep -A 10 '"registry-mirrors"' /etc/docker/daemon.json 2>/dev/null | grep 'http' | sed 's/^[[:space:]]*//;s/,$//')
+            if [ -n "$cur_mirrors" ]; then
+                echo "$cur_mirrors"
+            else
+                echo -e "  ${GREEN}默认官方源 (未配置额外加速镜像)${NC}"
+            fi
+        else
+            echo -e "  ${GREEN}默认官方源 (daemon.json 未创建)${NC}"
+        fi
+        echo -e "${CYAN}------------------------------------------------------${NC}"
+        echo "  1. ⚡ 一键智能并发测速并自动注入最优可用镜像源 (推荐)"
+        echo "  2. 📝 手动选择预设国内加速源列表"
+        echo "  3. ✍️  添加自定义私有/自建反代加速源 (如 CF Workers/专属加速)"
+        echo "  4. 🔄 彻底清除加速源，恢复官方默认直连"
+        echo "  0. 返回上级菜单"
+        echo -e "${CYAN}======================================================${NC}"
+        read -rp "请选择操作 [0-4]: " mh_choice < /dev/tty
+
+        case "$mh_choice" in
+            1) _docker_auto_heal_mirrors ;;
+            2) _docker_manual_select_mirrors ;;
+            3) _docker_add_custom_mirror ;;
+            4) _docker_restore_default_mirrors ;;
+            0) break ;;
+            *) echo -e "${RED}输入无效，请重新选择。${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
 # ── 主菜单循环 ───────────────────────────────────────────────────
 _docker_main_menu() {
     while true; do
@@ -194,17 +430,19 @@ _docker_main_menu() {
         echo "  2. Docker 服务指令管理 (启动/停止/重启/自启)"
         echo "  3. 执行安装 / 覆盖更新"
         echo "  4. 彻底卸载 Docker 及其组件"
-        echo "  5. 配置私有镜像库 (Private Registry)"
+        echo "  5. 🚀 Docker 镜像源智能分流与国内自愈加速"
+        echo "  6. 🔒 配置私有镜像库 (Private Registry)"
         echo "  0. 返回主菜单"
         echo -e "${GREEN}+======================================================+${NC}"
-        read -rp "请选择 [0-5]: " dc_choice < /dev/tty
+        read -rp "请选择 [0-6]: " dc_choice < /dev/tty
 
         case "$dc_choice" in
             1) _docker_show_status ;;
             2) _docker_service_menu ;;
             3) _docker_install_menu ;;
             4) _docker_uninstall ;;
-            5) _docker_config_private_registry ;;
+            5) _docker_mirror_healing_menu ;;
+            6) _docker_config_private_registry ;;
             0) break ;;
             *) echo -e "${RED}无效选项${NC}"; sleep 1 ;;
         esac
@@ -469,6 +707,9 @@ _docker_service_menu() {
 # ── 3. 安装模式选择 ──────────────────────────────────────────────
 _docker_install_menu() {
     clear
+    if declare -f _check_disk_space &>/dev/null; then
+        _check_disk_space 2048 /var || return 1
+    fi
     _docker_get_dist_info
     _docker_check_mirrors
     echo ""
@@ -663,3 +904,8 @@ _docker_uninstall() {
     fi
     read -rp "按回车键返回..." < /dev/tty
 }
+
+# 双模运行守卫: 支持被主程序 source 引用或独立单兵执行
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    docker_management_center
+fi
