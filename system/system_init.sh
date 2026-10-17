@@ -361,7 +361,7 @@ _update_live_data
 while true; do
     clear
     echo -e "${CYAN}======================================================${NC}"
-    echo -e "${CYAN}      Linux 系统初始化工具箱 v2.1 - By kikock      ${NC}"
+    echo -e "${CYAN}   Linux 系统初始化工具箱 v${OPSBOX_VERSION:-2.5.0} - By kikock    ${NC}"
     echo -e "${CYAN}======================================================${NC}"
     _draw_menu_header
     echo -e "${GREEN}══════════════ 🛠  系统运维中心 ══════════════${NC}"

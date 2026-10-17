@@ -93,17 +93,17 @@ apt / dnf / yum / apk / pacman / zypper / opkg / pkg（FreeBSD）
 
 ### 🟢 P2 级优化项（工程质量提升）
 
-#### 9. EOL 换行符问题
-参考源全部使用 `\r\n`（CRLF），ops-box 使用 `\n`（LF）——**ops-box 在这点上更正确**，但须确保 `.gitattributes` 强制 LF。
+#### 9. EOL 换行符问题 —— 【已优化落地 ✅】
+参考源全部使用 `\r\n`（CRLF），ops-box 使用 `\n`（LF）——**ops-box 在这点上更正确**。现已在根目录建立 `.gitattributes` 全局强制 `* text=auto eol=lf` 与 `*.sh text eol=lf`，确保跨平台协作时不被 Windows 破坏。
 
-#### 10. 缺少版本号与 CHANGELOG
-参考源：`sh_v="4.5.13"` 内嵌版本，`update_log.sh` 424 行详细记录每个版本变更  
-**ops-box 现状：** README.md 无版本号，无变更日志文件。
+#### 10. 缺少版本号与 CHANGELOG —— 【已优化落地 ✅】
+- **全局版本标识规范**：在 `common.sh` 导出 `OPSBOX_VERSION="2.5.0"`，并在 `system_init.sh` 菜单横幅动态引用 `v${OPSBOX_VERSION}`；
+- **标准更新日志体系**：根目录下已正式建立 [`CHANGELOG.md`](file:///d:/kikock_poject/Linux-ops-box/CHANGELOG.md)，遵循 Keep a Changelog 与 SemVer 规范，完整记录从 v2.0、v2.1 到当前 v2.5.0 的全量特性与架构重构历程。
 
-#### 11. 用户体验细节
-- 参考源有 `break_end()` 优雅的"按任意键继续"封装
-- 参考源有 `check_disk_space()` 安装前磁盘空间预检
-- 参考源 `send_stats()` 异步后台埋点（ops-box 无需照搬，但可参考异步模式）
+#### 11. 用户体验细节 —— 【已优化落地 ✅】
+- 针对参考源 `break_end()`，在 `common.sh` 封装了 `_press_any_key()` 交互辅助函数；
+- 针对参考源 `check_disk_space()`，在 `common.sh` 全局实现了 `_check_disk_space()`，已在软件管理看板全量安装、批量安装及 Docker 安装等高危入口前强制执行安全预检；
+- 参考源 `send_stats()` 异步后台埋点（为保证纯粹开源与用户隐私安全，ops-box 坚持零外发埋点，保持完全透明纯净）。
 
 ---
 
