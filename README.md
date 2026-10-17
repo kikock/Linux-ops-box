@@ -44,6 +44,7 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 | 13 | **硬盘检测与清理中心** | 磁盘使用率 / 大文件 / 大目录 / 智能清理辅助 | `disk_mgmt.sh` |
 | 14 | **系统时间管理中心** | 系统时区配置 / RTC硬件时钟 / NTP服务器搭建 / 多源对齐 / 开机同步 (详见 §7) | `time_mgmt.sh` |
 | 15 | **Telegram 运维告警中心** | Bot 消息推送 / CPU/内存/磁盘超限告警 (>85%预警, >95%严重) / Crontab 守护 / 防刷屏风暴抑制 | `notify.sh` |
+| 16 | **VPS 节点与代理管理中心** | **VPS-VPN 专家工具 (`install_vpn.sh`)** / **NaiveProxy (`naive_install.sh`)** / **Sing-box-yg 精装桶小白专享五协议共存脚本 (yonggekkk) 安装与进入控制台 (`sb`)** | `vps_mgmt.sh` |
 | 88 | **在线更新工具箱** | 智能探测最优加速通道 (支持5大源测速) 并云端热覆写 | 内置 |
 | 99 | **卸载工具箱** | 清理软链接与守护目录 | 内置 |
 | 0 | **退出工具箱** | 退出管理程序 | 内置 |
@@ -53,6 +54,7 @@ curl -sSL https://ghfast.top/https://raw.githubusercontent.com/kikock/Linux-ops-
 | 模块文件 | 职能描述 |
 |:---|:---|
 | `common.sh` | 全局底座：颜色规范、双写审计日志 (`/var/log/ck_system_init.log`)、跨平台包管理器统一支持 (`apt/dnf/yum/apk/pacman/zypper`)、**并发互斥安全锁 (`flock` 120s 防死锁)**、**系统级安装前磁盘预检 (`_check_disk_space`)** |
+| `vps_mgmt.sh` | **VPS 节点与代理管理中心**：聚合调度 WireGuard、Xray-Reality、NaiveProxy，并深度集成甬哥 Sing-box-yg 全协议共存脚本一键安装与 `sb` 控制台直接进入管理 |
 | `network_tune.sh` | **Linux 系统网络内核自适应深度调优中心**：链路物理带宽自动识别、并发全球 ICMP 测算 RTT 延迟与丢包率、4 档自适应 TCP 读写缓冲与队列优化、BBR 拥塞算法一键激活与无损配置回滚 |
 | `notify.sh` | **Telegram 运维告警中心**：轻量级 Bot 绑定、Markdown 格式告警卡片、Crontab 定时巡检（CPU/内存/磁盘）、1 小时告警风暴抑制锁 |
 | `time_mgmt.sh` | 系统时间管理中心：硬件时钟 (RTC/hwclock) 读写与校准、Docker NTP 服务器 (cturra/ntp) 一键部署、纯 Bash UDP 123 零依赖健康探测、Chrony/ntpdate 客户端配置与开机自启、时钟漂移综合诊断 |

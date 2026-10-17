@@ -4,22 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="2fd15132-d902-4914-bfb1-624deecd9e32" name="更改" comment="feat(db_mgmt):证书模块">
-      <change beforePath="$PROJECT_DIR$/system/modules/acme.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/acme.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/modules/common.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/common.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/modules/db_mgmt_loader.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/db_mgmt_loader.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/modules/disk_mgmt.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/disk_mgmt.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/modules/docker_mgmt.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/docker_mgmt.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/modules/firewall_mgmt.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/firewall_mgmt.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/modules/network.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/network.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/modules/nginx_view.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/nginx_view.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/modules/ssh_sec.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/ssh_sec.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/modules/ssl_cert.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/ssl_cert.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/modules/system_opt.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/system_opt.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/modules/time_mgmt.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/time_mgmt.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/modules/vnc_mgmt.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/modules/vnc_mgmt.sh" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/system/system_init.sh" beforeDir="false" afterPath="$PROJECT_DIR$/system/system_init.sh" afterDir="false" />
-    </list>
+    <list default="true" id="2fd15132-d902-4914-bfb1-624deecd9e32" name="更改" comment="feat(db_mgmt):证书模块" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />

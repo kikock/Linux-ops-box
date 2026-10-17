@@ -384,6 +384,8 @@ while true; do
     echo " 14. 系统时间管理中心     (时区/RTC硬件时钟/NTP服务/开机同步)"
     echo -e "${GREEN}══════════════ 📢  监控告警中心 ══════════════${NC}"
     echo " 15. Telegram 运维告警中心 (Bot消息/资源超限/磁盘告警)"
+    echo -e "${GREEN}══════════════ 🌐  出海与网络节点 ══════════════${NC}"
+    echo " 16. VPS 节点与代理管理中心 (VPN/NaiveProxy/Sing-box-yg)"
     echo -e "${GREEN}══════════════ ⚙   工具箱管理   ══════════════${NC}"
     echo -e "${YELLOW} 88. ♻  在线更新工具箱${NC}"
     echo -e "${RED} 99. 🗑  卸载此工具箱${NC}"
@@ -418,6 +420,7 @@ while true; do
         13) _load_module disk_mgmt && disk_management_center ;;
         14) _load_module time_mgmt && time_management_menu ;;
         15) _load_module notify && notify_menu ;;
+        16) _load_module vps_mgmt && vps_management_center ;;
         88) _update_toolbox ;;
         99)
             echo -e "${YELLOW}警告: 即将执行彻底卸载程序...${NC}"

@@ -28,6 +28,10 @@
 - **网络 IP 增强与出站路由优先级调度 (`network.sh`)**:
   - 增加 **优化 DNS 地址配置**：一键切换国外 DNS（1.1.1.1 / 8.8.8.8）、国内 DNS（223.5.5.5 / 183.60.83.19）或手动快速调起文本编辑器；
   - 增加 **IPv4 / IPv6 出站路由优先级调度**：管理 `/etc/gai.conf`，一键配置 `precedence ::ffff:0:0/96 100`，使系统优先走 IPv4，解决部分双栈网络下 IPv6 绕路卡顿问题。
+- **VPS 节点与代理服务管理中心 (`vps_mgmt.sh`)**:
+  - 聚合集成 **VPS-VPN 专家工具 (`install_vpn.sh`)**（WireGuard 隧道与 Xray-Reality 流量隐蔽代理）；
+  - 聚合集成 **NaiveProxy 自动化安装与管理 (`naive_install.sh`)**（基于 Caddy 补丁版的 HTTP/3 隐身代理）；
+  - 深度集成 **Sing-box-yg 精装桶小白专享一键五协议共存脚本 (yonggekkk)**：支持一键官方拉取安装/更新，以及安装完成后一键直接呼出 `sb` 管理控制台。
 - **企业级安全底座强化 (`common.sh`)**:
   - 引入基于 Linux `flock` 的跨终端并发安全文件锁 `_run_with_ops_lock`（120 秒防死锁超时），杜绝包管理器数据库并发损坏；
   - 新增系统级安装前磁盘预检机制 `_check_disk_space`，在大批量安装工具或部署 Docker 前强制核验可用容量，防止撑爆根分区；
