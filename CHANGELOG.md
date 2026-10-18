@@ -17,6 +17,9 @@
 - **精细化系统版本探测与指令抽象层 (`common.sh`)**:
   - **版本号深度解析**: 在 `_init_distro` 中提取全局 `DISTRO_VERSION_ID` 与 `DISTRO_MAJOR_VER`（大版本主号），精准支撑 Ubuntu 20/22/24、Debian 10/11/12、RHEL/CentOS 7/8/9、openEuler 等多代际条件判断；
   - **跨系统指令适配引擎 (`_init_system_commands`)**: 统一抽象不同发行版及版本间的底层命令差异，涵盖 Init 体系（`systemd` / `openrc` / `sysvinit`）、防火墙工具（`ufw` / `firewalld` / `awall` / `nftables` / `iptables`）、网络管理栈（`netplan` / `nmcli` / `ifupdown` / `network-scripts`）、时间同步服务（`chronyd` / `systemd-timesyncd` / `ntp`）、包清理指令及安全组件检测（SELinux / AppArmor）。
+- **VPS 综合 IP 质量与纯净度体检 (`vps_mgmt.sh`)**:
+  - **集成 Check.Place 权威诊断引擎 (`bash <(curl -Ls https://Check.Place) -I`)**: 自动检测 VPS IP 欺诈度评分（Fraud Score）、原生 IP 属性、双栈网络连通性、流媒体平台解锁能力（Netflix / Disney+ / YouTube 等）及邮件服务商黑名单（Spamhaus）；
+  - **多通道高可用与防劫持保护**: 支持官方源与国内 GitHub 加速镜像自动容灾切换，采用独立脚本落盘隔离，规避管道直接执行导致的 stdin 交互劫持问题。
 
 ---
 

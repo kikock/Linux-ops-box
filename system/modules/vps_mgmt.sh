@@ -214,6 +214,99 @@ _launch_singbox_plus() {
     fi
 }
 
+# 6. VPS IP 质量与纯净度体检 (Check.Place)
+_check_ip_quality() {
+    clear
+    echo -e "${CYAN}========================================================================${NC}"
+    echo -e "${CYAN}   🔍 VPS IP 质量体检与纯净度检测 (Powered by Check.Place)               ${NC}"
+    echo -e "${CYAN}========================================================================${NC}"
+    echo -e " 官方入口: https://Check.Place"
+    echo -e " 检测内容: 欺诈度评分 / 原生IP属性 / 双栈连通性 / 流媒体解锁 / 黑名单体检"
+    echo -e "${CYAN}------------------------------------------------------------------------${NC}"
+    echo ""
+
+    if ! command -v curl &>/dev/null; then
+        echo -e "${YELLOW}>> 未检测到 curl，正在自动安装基础依赖...${NC}"
+        if declare -f _pkg_install_universal &>/dev/null; then
+            _pkg_install_universal curl
+        elif command -v apt-get &>/dev/null; then
+            apt-get update -y && apt-get install -y curl
+        elif command -v yum &>/dev/null; then
+            yum install -y curl
+        elif command -v dnf &>/dev/null; then
+            dnf install -y curl
+        elif command -v apk &>/dev/null; then
+            apk add --no-cache curl
+        fi
+    fi
+
+    echo -e "${YELLOW}即将启动 IP 质量体检向导...${NC}"
+    read -rp "是否立即开始检测当前 VPS 的 IP 质量？[Y/n]: " do_check < /dev/tty
+    if [[ "$do_check" =~ ^[Nn]$ ]]; then
+        echo -e "${BLUE}已取消检测。${NC}"
+        sleep 1
+        return 0
+    fi
+
+    echo ""
+    echo -e "${CYAN}>> 正在连接并拉取 Check.Place 检测脚本...${NC}"
+    if declare -f _log_info &>/dev/null; then
+        _log_info "用户启动 VPS IP 质量检测 (Check.Place -I)"
+    fi
+
+    local candidate_urls=(
+        "https://Check.Place"
+        "https://raw.githubusercontent.com/xykt/ScriptMenu/main/menu.sh"
+        "https://ghfast.top/https://raw.githubusercontent.com/xykt/ScriptMenu/main/menu.sh"
+        "https://ghp.ci/https://raw.githubusercontent.com/xykt/ScriptMenu/main/menu.sh"
+        "https://mirror.ghproxy.com/https://raw.githubusercontent.com/xykt/ScriptMenu/main/menu.sh"
+    )
+
+    local tmp_script="/tmp/check_place_$$.sh"
+    rm -f "$tmp_script"
+    local dl_ok=false
+
+    for url in "${candidate_urls[@]}"; do
+        echo -n "   ➜ 尝试源 [${url:0:45}...] ... "
+        if curl -fsSL --connect-timeout 6 --max-time 30 -o "$tmp_script" "$url" 2>/dev/null; then
+            if [ -s "$tmp_script" ] && grep -qE "(Font_|IPQuality|xykt|bash)" "$tmp_script"; then
+                echo -e "${GREEN}就绪${NC}"
+                dl_ok=true
+                break
+            fi
+        fi
+        echo -e "${RED}超时或连接受阻${NC}"
+        rm -f "$tmp_script"
+    done
+
+    echo ""
+    echo -e "${CYAN}========================================================================${NC}"
+    if [ "$dl_ok" = "true" ] && [ -s "$tmp_script" ]; then
+        chmod +x "$tmp_script"
+        echo -e "${GREEN}>> 脚本加载完成，开始执行 IP 质量检测 (参数: -I)...${NC}"
+        echo ""
+        bash "$tmp_script" -I
+        local exit_code=$?
+        rm -f "$tmp_script"
+        if declare -f _log_info &>/dev/null; then
+            _log_info "VPS IP 质量检测执行结束 (退出码: ${exit_code})"
+        fi
+    else
+        echo -e "${YELLOW}>> 备用通道下载受阻，尝试直接通过官方命令管道执行...${NC}"
+        bash <(curl -Ls https://Check.Place) -I < /dev/tty
+        local exit_code=$?
+        if declare -f _log_info &>/dev/null; then
+            _log_info "VPS IP 质量检测官方管道执行结束 (退出码: ${exit_code})"
+        fi
+    fi
+
+    echo ""
+    echo -e "${CYAN}========================================================================${NC}"
+    echo -e "${GREEN}✅ IP 质量体检流程已完成！${NC}"
+    echo ""
+    read -rp "按回车键返回菜单..." < /dev/tty
+}
+
 # ── VPS 与代理管理中心主菜单 ──────────────────────────────────────
 vps_management_center() {
     while true; do
@@ -242,9 +335,10 @@ vps_management_center() {
         echo -e " 4. 🚀 进入 Sing-box-yg 管理控制台 (快速唤出 sb 控制台面板)"
         echo -e " ------------------------------------------------------------------------"
         echo -e " 5. 🌐 Sing-Box-Plus 多节点管理    (18节点直连+WARP综合管理脚本)"
+        echo -e " 6. 🔍 VPS IP 质量与纯净度体检    (Check.Place - 欺诈度/流媒体/黑名单/原生IP检测)"
         echo -e " 0. ↩  返回主菜单"
         echo -e "${CYAN}========================================================================${NC}"
-        read -rp "请输入操作选项 [0-5]: " vps_choice < /dev/tty
+        read -rp "请输入操作选项 [0-6]: " vps_choice < /dev/tty
 
         case "$vps_choice" in
             1) _launch_vpn_manager ;;
@@ -252,6 +346,7 @@ vps_management_center() {
             3) _install_singbox_yg ;;
             4) _enter_singbox_yg ;;
             5) _launch_singbox_plus ;;
+            6) _check_ip_quality ;;
             0) break ;;
             *) echo -e "${RED}输入无效，请重新选择。${NC}"; sleep 1 ;;
         esac
