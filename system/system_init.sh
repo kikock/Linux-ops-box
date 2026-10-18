@@ -22,6 +22,7 @@ fi
 BASE_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 if [ -f "$BASE_DIR/modules/common.sh" ]; then
     source "$BASE_DIR/modules/common.sh"
+    _log_info "Linux-ops-box 终极运维工具箱启动就绪 [系统: ${DISTRO_NAME} (${ARCH}) | 内核: $(uname -r)]"
 else
     echo -e "\033[0;31m[致命错误]\033[0m 找不到核心库文件: $BASE_DIR/modules/common.sh"
     echo "请确保已完整配置脚本目录结构。工具初始化阻断。"
@@ -34,6 +35,7 @@ fi
 # ================================================================
 _load_module() {
     local mod_name="$1"
+    _log_info "正在动态载入微服务模块: [${mod_name}]"
     # 查找顺序: 当前相对目录 -> /opt/ck_sysinit 物理目录
     local mod_file=""
     local candidates=(
@@ -51,6 +53,7 @@ _load_module() {
 
     if [ -n "$mod_file" ] && [ -f "$mod_file" ]; then
         source "$mod_file"
+        _log_info "微服务模块 [${mod_name}] 加载成功"
         return 0
     else
         _log_err "无法加载微服务模块 [${mod_name}]，未找到对应模块文件。"
@@ -68,6 +71,7 @@ _log_info "正在采集硬件指纹与网络拓扑..."
 OS_NAME="${DISTRO_NAME:-未知}"
 KERNEL=$(uname -r)
 ARCH=$(uname -m)
+ARCH_DESC=$(_get_cpu_arch_info)
 IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}')
 # 获取默认网卡 MAC 地址
 PRIMARY_IF=$(ip route get 1.1.1.1 2>/dev/null | awk '/dev/ {print $5}' | head -1)
@@ -76,11 +80,16 @@ MAC_ADDR=$(cat /sys/class/net/${PRIMARY_IF}/address 2>/dev/null || echo "未知"
 CPU_MODEL=$(lscpu 2>/dev/null | grep -E "^Model name|^型号" | head -1 | cut -d: -f2 | xargs)
 [ -z "$CPU_MODEL" ] && CPU_MODEL=$(grep -m1 "model name" /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
 [ -z "$CPU_MODEL" ] && CPU_MODEL="未知处理器"
+CPU_CORES=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "1")
 
 # ----------------------------------------------------------------
 # 2. 动态指标仪表盘逻辑
 # ----------------------------------------------------------------
 _update_live_data() {
+    # 动态当前时间与时区
+    TIME_LIVE=$(_get_current_time)
+    TIMEZONE_LIVE=$(_get_timezone_info)
+
     # 负载与 Uptime
     LOAD_LIVE=$(uptime | awk -F'load average:' '{print $2}' | xargs)
     UPTIME_LIVE=$(uptime -p 2>/dev/null | sed 's/up //')
@@ -117,8 +126,10 @@ _update_live_data() {
 _draw_menu_header() {
     _update_live_data
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e " ${GREEN}●${NC} 系统环境: ${GREEN}${OS_NAME} (${ARCH})${NC}"
-    echo -e " ${GREEN}●${NC} 内核版本: ${KERNEL}"
+    echo -e " ${GREEN}●${NC} 系统环境: ${GREEN}${OS_NAME}${NC} (内核: ${KERNEL})"
+    echo -e " ${GREEN}●${NC} CPU 架构: ${YELLOW}${ARCH_DESC}${NC} | ${CYAN}${CPU_CORES} 核${NC} (${CPU_MODEL})"
+    echo -e " ${GREEN}●${NC} 系统时区: ${CYAN}${TIMEZONE_LIVE}${NC}"
+    echo -e " ${GREEN}●${NC} 当前时间: ${YELLOW}${TIME_LIVE}${NC}"
     echo -e " ${GREEN}●${NC} 网路负载: ${YELLOW}IP: ${IP_ADDR:-未知} ${NC}| ${YELLOW}MAC: ${MAC_ADDR}${NC}"
     echo -e "${CYAN}────────────────────────────────────────────────────${NC}"
     echo -e " ${CYAN}●${NC} CPU 负载: ${CYAN}${LOAD_LIVE}${NC}"
@@ -392,6 +403,7 @@ while true; do
     echo " 0.  退出工具箱"
     echo -e "${GREEN}==============================================${NC}"
     read -p "请输入指令编号: " choice < /dev/tty
+    _log_info "用户触发主菜单操作项: [${choice}]"
 
     case $choice in
         1)  _load_module system_opt && update_system_packages ;;
@@ -432,10 +444,15 @@ while true; do
                 echo -e "${YELLOW}请在退出后手动执行以下指令完成最后清理：${NC}"
                 echo -e "  ${CYAN}rm -rf /opt/ck_sysinit${NC}"
                 echo -e "${BLUE}感谢使用！${NC}"
+                _log_info "用户执行彻底卸载 Linux-ops-box 工具箱"
                 exit 0
             fi
             ;;
-        0) echo -e "${BLUE}感谢使用，再见！- kikock${NC}"; exit 0 ;;
+        0)
+            _log_info "用户退出 Linux-ops-box 工具箱"
+            echo -e "${BLUE}感谢使用，再见！- kikock${NC}"
+            exit 0
+            ;;
         *) echo -e "${RED}输入无效，请重新选择。${NC}"; sleep 1 ;;
     esac
 done

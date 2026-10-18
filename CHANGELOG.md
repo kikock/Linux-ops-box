@@ -3,6 +3,21 @@
 本文档记录 **Linux-ops-box** 的所有重大版本演进与功能迭代。
 本项目的版本号严格遵循 [语义化版本规范 (Semantic Versioning 2.0.0)](https://semver.org/lang/zh-CN/)。
 
+## [v2.6.0] - 2026-10-18
+
+### 🚀 新增功能 (Features)
+- **初始菜单仪表盘维度增强 (`system_init.sh`)**:
+  - **CPU 架构与规格全景**: 自动探测 CPU 架构代码（x86_64、aarch64、loongarch64、riscv64、armv7l 等），并转换映射为友好的中文解读、多核心数与处理器型号；
+  - **系统时区与偏移标注**: 通过 `timedatectl` -> `/etc/timezone` -> `/etc/localtime` 多级策略，精准解析当前时区及 UTC 偏移量（如 `Asia/Shanghai (CST, UTC+08:00)`）；
+  - **当前系统时间实时展示**: 仪表盘动态更新并展示年月日时分秒，方便校对服务器时间。
+- **全链路脚本与命令审计执行日志 (`common.sh`)**:
+  - **命令双写执行器 (`_log_exec` / `_run_cmd_log`)**: 自动记录命令调用上下文、执行耗时、状态码（Exit Code），并在控制台实时呈现的同时清洗 ANSI 彩色转义码持久化至 `/var/log/ck_system_init.log`；
+  - **安全降级与轮转保护 (`_rotate_log_if_needed`)**: 无 root 或 `/var/log` 权限时平滑降级至 `/tmp/ck_system_init.log`；单文件满 10MB 自动轮转至 `.1`，彻底规避磁盘空间耗尽风险；
+  - **菜单与微服务操作审计**: 主菜单选择、微模块懒加载（`_load_module`）以及卸载退出操作全生命周期审计留痕。
+- **精细化系统版本探测与指令抽象层 (`common.sh`)**:
+  - **版本号深度解析**: 在 `_init_distro` 中提取全局 `DISTRO_VERSION_ID` 与 `DISTRO_MAJOR_VER`（大版本主号），精准支撑 Ubuntu 20/22/24、Debian 10/11/12、RHEL/CentOS 7/8/9、openEuler 等多代际条件判断；
+  - **跨系统指令适配引擎 (`_init_system_commands`)**: 统一抽象不同发行版及版本间的底层命令差异，涵盖 Init 体系（`systemd` / `openrc` / `sysvinit`）、防火墙工具（`ufw` / `firewalld` / `awall` / `nftables` / `iptables`）、网络管理栈（`netplan` / `nmcli` / `ifupdown` / `network-scripts`）、时间同步服务（`chronyd` / `systemd-timesyncd` / `ntp`）、包清理指令及安全组件检测（SELinux / AppArmor）。
+
 ---
 
 ## [v2.5.0] - 2026-10-17
